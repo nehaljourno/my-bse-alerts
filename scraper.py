@@ -1,7 +1,7 @@
 import requests
 from google import genai
 import os
-import re
+import time  # New: This lets us add delays
 
 # --- YOUR WATCHLIST ---
 WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "MIDWEST"]
@@ -10,8 +10,6 @@ WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "MIDWEST"]
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TG_CHAT = os.getenv("TELEGRAM_CHAT_ID")
-
-# Initialize the 2026 AI Client
 client = genai.Client(api_key=GEMINI_KEY)
 
 def analyze_and_send():
@@ -28,34 +26,39 @@ def analyze_and_send():
         
         if response.status_code == 200:
             print("Successfully connected to BSE.")
-            # We clean the text to make it easier for the AI to read
             page_text = response.text.upper()
             
             for company in WATCHLIST:
                 if company in page_text:
-                    print(f"Match found for {company}!")
+                    print(f"Match found for {company}! Preparing AI analysis...")
                     
-                    # Grab a chunk of text around the company name to give context to the AI
-                    start_index = max(0, page_text.find(company) - 200)
-                    end_index = min(len(page_text), page_text.find(company) + 300)
-                    context = page_text[start_index:end_index]
+                    # Grab context around the match
+                    idx = page_text.find(company)
+                    context = page_text[max(0, idx-250) : min(len(page_text), idx+250)]
 
-                    # THE FIX: Updated to 'gemini-2.0-flash'
-                    prompt = f"Act as a business editor. Here is a snippet from BSE: '{context}'. If it shows a major new announcement for {company}, write a 1-sentence summary. If it is old or routine, reply ONLY with 'IGNORE'."
-                    
-                    ai_response = client.models.generate_content(
-                        model='gemini-2.0-flash', 
-                        contents=prompt
-                    )
-                    decision = ai_response.text.strip()
-                    
-                    if "IGNORE" not in decision.upper():
-                        message = f"📌 {decision}\n\n🔗 Source: https://www.bseindia.com/corporates/ann.html"
-                        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
-                                      json={"chat_id": TG_CHAT, "text": message})
-                        print(f"✅ Telegram Alert sent for {company}!")
-                    else:
-                        print(f"⏭️ AI decided to ignore routine news for {company}.")
+                    try:
+                        # THE AI REQUEST
+                        ai_response = client.models.generate_content(
+                            model='gemini-2.0-flash', 
+                            contents=f"Summarize this BSE news for {company} in 1 sentence. Snippet: '{context}'. If routine, reply ONLY with 'IGNORE'."
+                        )
+                        decision = ai_response.text.strip()
+                        
+                        if "IGNORE" not in decision.upper():
+                            message = f"📌 {decision}\n\n🔗 Source: https://www.bseindia.com/corporates/ann.html"
+                            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
+                                          json={"chat_id": TG_CHAT, "text": message})
+                            print(f"✅ Telegram Alert sent for {company}!")
+                        
+                        # --- THE FIX: WAIT 10 SECONDS ---
+                        # This prevents the 429 Error by slowing down the loop
+                        print("Waiting 10 seconds to respect API limits...")
+                        time.sleep(10)
+
+                    except Exception as ai_err:
+                        print(f"AI Error for {company}: {ai_err}")
+                        # If we still hit a limit, wait even longer
+                        time.sleep(30) 
         else:
             print(f"BSE connection failed. Code: {response.status_code}")
 
