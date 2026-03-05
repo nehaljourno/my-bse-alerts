@@ -1,37 +1,38 @@
 import feedparser
 import requests
-import google.generativeai as genai
+from google import genai
 import os
 
 # --- YOUR WATCHLIST ---
 WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI"]
 
-# These lines pull your keys from the GitHub "Safe" (Secrets)
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+# Set up the AI Client (New Version)
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TG_CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
-# Set up the AI
-genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
-
 def analyze_and_send():
+    print("Checking BSE RSS Feed...")
     feed = feedparser.parse("https://www.bseindia.com/RSS/Corporate_Ann.xml")
     
+    if not feed.entries:
+        print("Feed is empty or unreachable.")
+        return
+
     for entry in feed.entries:
         headline = entry.title.upper()
         
-        # Check if company is in watchlist
         if any(company in headline for company in WATCHLIST):
+            prompt = f"Act as a business editor. Analyze this BSE alert: '{entry.title}'. If it is a major business development (new order, earnings, resignation, etc.), write a 1-sentence summary. If it is routine/procedural, reply ONLY with 'IGNORE'."
             
-            # Ask the AI for its opinion
-            prompt = f"Act as a business editor. Analyze this BSE headline: '{entry.title}'. If it is a major business development (new order, earnings, resignation, etc.), write a 1-sentence summary. If it is routine/procedural, reply ONLY with 'IGNORE'."
-            
-            response = model.generate_content(prompt)
+            # Using the new SDK method
+            response = client.models.generate_content(
+                model='gemini-1.5-flash',
+                contents=prompt
+            )
             decision = response.text.strip()
             
             if "IGNORE" not in decision.upper():
-                # Send to Telegram
                 message = f"📌 {decision}\n\n🔗 {entry.link}"
                 url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
                 requests.post(url, json={"chat_id": TG_CHAT, "text": message})
