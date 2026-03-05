@@ -19,7 +19,7 @@ client = genai.Client(api_key=GEMINI_KEY)
 
 def analyze_and_send():
     # UPDATED 2026 URL: BSE moved the feed to their 'corporates' section
-    rss_url = "https://www.bseindia.com/corporates/ann.xml"
+    rss_url = "https://www.bseindia.com/corporates/ann.html"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
