@@ -4,7 +4,7 @@ from google import genai
 import os
 
 # --- YOUR WATCHLIST ---
-WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI"]
+WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "MIDWEST"]
 
 # Set up the AI Client (New Version)
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
