@@ -15,7 +15,7 @@ client = genai.Client(api_key=GEMINI_KEY)
 
 def analyze_and_send():
     # This is the most stable RSS link for BSE
-    rss_url = "https://www.bseindia.com/RSS/Corporate_Ann.xml"
+    rss_url = "https://www.bseindia.com/corporates/ann.xml"
     
     # Advanced headers to look exactly like a real browser
     headers = {
