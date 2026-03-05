@@ -12,11 +12,7 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - name: Install Chrome
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
       - name: Install Tools
-        run: pip install requests pandas selenium
-      - name: Check BSE
+        run: pip install requests feedparser
+      - name: Check BSE RSS
         run: python scraper.py
