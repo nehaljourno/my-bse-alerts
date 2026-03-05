@@ -6,7 +6,7 @@ import os
 # ==========================================
 # 1. YOUR WATCHLIST
 # ==========================================
-WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI"]
+WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "MIDWEST"]
 
 # ==========================================
 # 2. SETUP THE TOOLS
@@ -19,7 +19,7 @@ client = genai.Client(api_key=GEMINI_KEY)
 
 def analyze_and_send():
     # UPDATED 2026 URL: BSE moved the feed to their 'corporates' section
-    rss_url = "https://www.bseindia.com/corporates/ann.html"
+    rss_url = "https://www.bseindia.com/corporates/ann.xml"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -51,8 +51,7 @@ def analyze_and_send():
                 if any(company in headline for company in WATCHLIST):
                     prompt = f"""
                     Act as a senior business journalist. Analyze this BSE headline: '{entry.title}'. 
-                    If it is important (orders, earnings, resignations), write a 1-sentence summary. 
-                    If it is routine paperwork, reply ONLY with: IGNORE
+                    Write a one sentence summary of it
                     """
                     
                     ai_analysis = client.models.generate_content(
