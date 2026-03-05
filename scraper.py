@@ -1,50 +1,37 @@
-import time
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
+import feedparser
 
 # --- YOUR WATCHLIST ---
-WATCHLIST = ["RELIANCE", "INFOSYS", "TATA", "ADANI", "HDFC"]
+# Tip: Use short, unique parts of the company name
+WATCHLIST = ["RELIANCE", "INFOSYS", "TATA MOTORS", "HDFC BANK", "ADANI"]
 
-def run_scraper():
-    options = Options()
-    options.add_argument("--headless=new") # Use the 'new' stealthy headless mode
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    # This line tells the website we are a real person on a Windows computer
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+def check_rss_feed():
+    # This is the official BSE "Corporate Announcements" RSS Feed
+    rss_url = "https://www.bseindia.com/RSS/Corporate_Ann.xml"
     
-    driver = webdriver.Chrome(options=options)
-    # Give the browser more time to wait for the website
-    driver.set_page_load_timeout(180) 
+    print("Checking BSE RSS Feed...")
     
-    try:
-        print("Visiting BSE with Stealth Mode...")
-        # We visit Google first so it looks like we clicked a link
-        driver.get("https://www.google.com")
-        time.sleep(2)
+    # The robot 'parses' (reads) the feed
+    feed = feedparser.parse(rss_url)
+    
+    found_something = False
+    
+    # Loop through every news item in the feed
+    for entry in feed.entries:
+        # entry.title usually contains 'Company Name - Subject'
+        headline = entry.title.upper()
         
-        driver.get("https://www.bseindia.com/corporates/ann.html")
-        
-        # We wait 15 seconds for the table to appear
-        time.sleep(15)
-        
-        news_items = driver.find_elements(By.CLASS_NAME, "tableborder")
-        
-        found = False
-        for item in news_items:
-            content = item.text.upper()
-            if any(company in content for company in WATCHLIST):
-                if "TRADING WINDOW" not in content:
-                    print(f"MATCH: {item.text}")
-                    found = True
-        
-        if not found:
-            print("Successfully checked. No matches today.")
+        # 1. Check if company is in your watchlist
+        if any(company in headline for company in WATCHLIST):
             
-    except Exception as e:
-        print(f"BSE is still being difficult. Error: {e}")
-    finally:
-        driver.quit()
+            # 2. Filter out the boring 'Trading Window' noise
+            if "TRADING WINDOW" not in headline:
+                print(f"🚨 MATCH FOUND: {entry.title}")
+                print(f"Link to PDF: {entry.link}")
+                print("-" * 30)
+                found_something = True
+                
+    if not found_something:
+        print("Feed checked. No new watchlist matches in the latest 100 filings.")
 
 if __name__ == "__main__":
-    run_scraper()
+    check_rss_feed()
