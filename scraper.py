@@ -2,7 +2,7 @@ import feedparser
 
 # --- YOUR WATCHLIST ---
 # Tip: Use short, unique parts of the company name
-WATCHLIST = ["RELIANCE", "INFOSYS", "TATA MOTORS", "HDFC BANK", "ADANI"]
+WATCHLIST = ["RELIANCE", "INFOSYS", "TATA MOTORS", "HDFC BANK", "ADANI", "Shriram Asset Management"]
 
 def check_rss_feed():
     # This is the official BSE "Corporate Announcements" RSS Feed
