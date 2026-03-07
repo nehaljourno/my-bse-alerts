@@ -2,11 +2,11 @@ import requests
 from google import genai
 import os
 import time
-import re
 from io import BytesIO
 import pypdf
 
-WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "MIDWEST", "SADHANA", "544587", "506642"]
+# Config
+WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "MIDWEST", "SADHANA"]
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TG_CHAT = os.getenv("TELEGRAM_CHAT_ID")
@@ -22,60 +22,50 @@ def save_sent(alert_id):
         f.write(f"{alert_id}\n")
 
 def analyze_and_send():
-    # THE STEALTH HEADERS - Mimicking a real 2026 Chrome Browser
+    # The "Secret" Mobile API URL - Much more reliable than the website
+    url = "https://api.bseindia.com/BseDirect/External/CorporateAnnouncement.aspx"
+    
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.google.com/",
-        "Connection": "keep-alive"
+        "User-Agent": "BSEIndia/3.0 (Android)", # Mimics the official app
+        "Accept": "application/json",
+        "Host": "api.bseindia.com"
     }
     
-    url = "https://www.bseindia.com/corporates/ann.html"
     sent_list = get_already_sent()
 
     try:
-        # Step 1: Get the page
-        session = requests.Session()
-        response = session.get(url, headers=headers, timeout=30)
-        html = response.text
+        # Step 1: Get the clean JSON data
+        response = requests.get(url, headers=headers, timeout=20)
+        data = response.json() # This is a list of announcements
         
-        # DEBUG: Check if we are actually getting the table
-        if "TBDATAMAIN" not in html:
-            print("⚠️ ALERT: BSE Table blocked by security challenge. Approach B (API) might be needed.")
-        
-        # Step 2: Extract ALL PDF links and their surrounding text
-        # We look for the pattern: ...[Some Text]...[PDF Link]
-        matches = re.findall(r'([\s\S]{1,500}?)href=["\'](.*?\.pdf)["\']', html, re.IGNORECASE)
-        
-        print(f"Total PDF links found: {len(matches)}")
-
-        for context, pdf_path in matches:
-            pdf_url = f"https://www.bseindia.com{pdf_path}" if pdf_path.startswith('/') else pdf_path
+        for ann in data:
+            company_name = ann.get("SLONGNAME", "").upper()
+            subject = ann.get("NEWSSUB", "")
+            pdf_link = ann.get("ATTACHMENTNAME", "") # Direct link!
             
-            # Match against watchlist
-            found_target = next((t for t in WATCHLIST if t.upper() in context.upper()), None)
-            
-            if found_target:
+            # Check if company is in our watchlist
+            if any(t in company_name for t in WATCHLIST):
+                pdf_url = f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{pdf_link}"
                 alert_id = str(hash(pdf_url))
+
                 if alert_id in sent_list: continue
 
-                print(f"🎯 HIT: Found {found_target} near link {pdf_url}")
+                print(f"🎯 Match Found: {company_name}")
 
-                # Step 3: Deep Scan the PDF
+                # Step 2: Read PDF
                 try:
-                    pdf_res = session.get(pdf_url, headers=headers, timeout=20)
+                    pdf_res = requests.get(pdf_url, headers={"User-Agent": "Mozilla/5.0"})
                     f = BytesIO(pdf_res.content)
                     reader = pypdf.PdfReader(f)
                     pdf_text = "".join([p.extract_text() or "" for p in reader.pages[:3]])
 
-                    prompt = f"Analyze this BSE filing for {found_target}. If it is a management change, order win, or major news, summarize in 1 sentence. Otherwise reply IGNORE. Text: {pdf_text[:3000]}"
+                    prompt = f"Analyze this filing for {company_name}. Subject: {subject}. PDF Content: {pdf_text[:3000]}. If it involves management changes, orders, or defaults, summarize in 1 clear sentence. Otherwise reply IGNORE."
                     
                     ai_res = client.models.generate_content(model='gemini-3.1-flash', contents=prompt)
                     summary = ai_res.text.strip()
 
                     if "IGNORE" not in summary.upper():
-                        msg = f"🚨 *Deep Alert: {found_target}*\n\n{summary}\n\n🔗 [PDF]({pdf_url})"
+                        msg = f"🚨 *Deep Alert: {company_name}*\n\n{summary}\n\n🔗 [Open PDF]({pdf_url})"
                         requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
                                       json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "Markdown"})
                         save_sent(alert_id)
@@ -84,7 +74,7 @@ def analyze_and_send():
                     print(f"PDF Error: {e}")
 
     except Exception as e:
-        print(f"Connection Error: {e}")
+        print(f"API Access Error: {e}. BSE might be down or blocking the Data Center IP.")
 
 if __name__ == "__main__":
     analyze_and_send()
