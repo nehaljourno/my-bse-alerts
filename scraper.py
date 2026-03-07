@@ -1,11 +1,12 @@
-import requests
+from seleniumbase import Driver
 from google import genai
 import os
 import time
+import re
 from io import BytesIO
 import pypdf
+import requests
 
-# Config
 WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "MIDWEST", "SADHANA"]
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -22,59 +23,59 @@ def save_sent(alert_id):
         f.write(f"{alert_id}\n")
 
 def analyze_and_send():
-    # The "Secret" Mobile API URL - Much more reliable than the website
-    url = "https://api.bseindia.com/BseDirect/External/CorporateAnnouncement.aspx"
-    
-    headers = {
-        "User-Agent": "BSEIndia/3.0 (Android)", # Mimics the official app
-        "Accept": "application/json",
-        "Host": "api.bseindia.com"
-    }
-    
+    # Initialize Undetected Driver
+    driver = Driver(browser="chrome", uc=True, headless=True)
     sent_list = get_already_sent()
-
+    
     try:
-        # Step 1: Get the clean JSON data
-        response = requests.get(url, headers=headers, timeout=20)
-        data = response.json() # This is a list of announcements
-        
-        for ann in data:
-            company_name = ann.get("SLONGNAME", "").upper()
-            subject = ann.get("NEWSSUB", "")
-            pdf_link = ann.get("ATTACHMENTNAME", "") # Direct link!
-            
-            # Check if company is in our watchlist
-            if any(t in company_name for t in WATCHLIST):
-                pdf_url = f"https://www.bseindia.com/xml-data/corpfiling/AttachLive/{pdf_link}"
-                alert_id = str(hash(pdf_url))
+        url = "https://www.bseindia.com/corporates/ann.html"
+        driver.get(url)
+        time.sleep(10) # Wait for JS to render the table
 
+        # Get the actual rendered HTML
+        html = driver.page_source
+        
+        # Look for PDF links in the rendered page
+        matches = re.findall(r'href=["\'](.*?\.pdf)["\']', html, re.IGNORECASE)
+        print(f"Total PDFs found: {len(matches)}")
+
+        for pdf_path in matches:
+            pdf_url = f"https://www.bseindia.com{pdf_path}" if pdf_path.startswith('/') else pdf_path
+            
+            # Find the text near this link
+            link_pos = html.find(pdf_path)
+            context = html[max(0, link_pos-500) : min(len(html), link_pos+500)].upper()
+
+            found_target = next((t for t in WATCHLIST if t.upper() in context), None)
+            
+            if found_target:
+                alert_id = str(hash(pdf_url))
                 if alert_id in sent_list: continue
 
-                print(f"🎯 Match Found: {company_name}")
+                print(f"🎯 HIT: {found_target} -> {pdf_url}")
 
-                # Step 2: Read PDF
                 try:
+                    # Download PDF using the driver's cookies to stay stealthy
                     pdf_res = requests.get(pdf_url, headers={"User-Agent": "Mozilla/5.0"})
                     f = BytesIO(pdf_res.content)
                     reader = pypdf.PdfReader(f)
                     pdf_text = "".join([p.extract_text() or "" for p in reader.pages[:3]])
 
-                    prompt = f"Analyze this filing for {company_name}. Subject: {subject}. PDF Content: {pdf_text[:3000]}. If it involves management changes, orders, or defaults, summarize in 1 clear sentence. Otherwise reply IGNORE."
+                    prompt = f"Analyze this filing for {found_target}. Text: {pdf_text[:3000]}. If it's a management change or major order, summarize in 1 sentence. Else reply IGNORE."
                     
                     ai_res = client.models.generate_content(model='gemini-3.1-flash', contents=prompt)
                     summary = ai_res.text.strip()
 
                     if "IGNORE" not in summary.upper():
-                        msg = f"🚨 *Deep Alert: {company_name}*\n\n{summary}\n\n🔗 [Open PDF]({pdf_url})"
+                        msg = f"🚨 *Deep Alert: {found_target}*\n\n{summary}\n\n🔗 [PDF]({pdf_url})"
                         requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
                                       json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "Markdown"})
                         save_sent(alert_id)
-                        print(f"✅ Alert sent!")
                 except Exception as e:
                     print(f"PDF Error: {e}")
 
-    except Exception as e:
-        print(f"API Access Error: {e}. BSE might be down or blocking the Data Center IP.")
+    finally:
+        driver.quit()
 
 if __name__ == "__main__":
     analyze_and_send()
