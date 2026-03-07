@@ -8,7 +8,7 @@ import pypdf
 import re # Added for flexible link searching
 
 # --- CONFIGURATION ---
-WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "MIDWEST", "544587"]
+WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "SADHANA"]
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
