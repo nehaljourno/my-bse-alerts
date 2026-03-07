@@ -2,17 +2,19 @@ name: BSE Deep Scraper
 
 on:
   schedule:
-    - cron: '*/15 * * * *' # Every 15 minutes
-  workflow_dispatch: # Allows manual run
+    - cron: '*/10 * * * *' 
+  workflow_dispatch: 
 
 jobs:
-  build:
+  scrape:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to save the sent_alerts.txt state
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -27,10 +29,10 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scraper.py
 
-      - name: Save Sent Alerts State
+      - name: Commit State
         run: |
           git config --global user.name 'BSE-Bot'
           git config --global user.email 'bot@bse.com'
           git add sent_alerts.txt || true
-          git commit -m "Update sent alerts [skip ci]" || true
+          git commit -m "Update sent alerts history [skip ci]" || true
           git push || true
