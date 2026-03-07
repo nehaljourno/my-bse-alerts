@@ -5,10 +5,11 @@ import time
 from datetime import datetime
 from io import BytesIO
 import pypdf
-import re # Added for flexible link searching
+import re
 
 # --- CONFIGURATION ---
-WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "SADHANA"]
+# Added SADHANA as requested
+WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "MIDWEST", "SADHANA", "544587", "506642"]
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -17,7 +18,6 @@ client = genai.Client(api_key=GEMINI_KEY)
 
 def is_market_time():
     now_utc = datetime.utcnow()
-    # 6 AM - 12 AM IST is approx 0:30 to 18:30 UTC
     return 0 <= now_utc.hour <= 19
 
 def get_already_sent():
@@ -35,7 +35,7 @@ def analyze_and_send():
         return
 
     url = "https://www.bseindia.com/corporates/ann.html"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     sent_list = get_already_sent()
 
     try:
@@ -43,62 +43,61 @@ def analyze_and_send():
         if response.status_code != 200: return
 
         html = response.text
-        # Look for the main data table
-        table = html.split("TBDATAMAIN")[1].split("</TABLE")[0] if "TBDATAMAIN" in html.upper() else html
+        # ISOLATE TABLE AND SPLIT INTO INDIVIDUAL ROWS
+        if "TBDATAMAIN" in html.upper():
+            table_content = html.upper().split("TBDATAMAIN")[1].split("</TABLE")[0]
+            rows = table_content.split("<TR")
+        else:
+            rows = html.split("<tr")
 
-        for target in WATCHLIST:
-            if target.upper() in table.upper():
-                # Find exactly where the company is mentioned
-                match_idx = table.upper().find(target.upper())
-                # Look at the 1000 characters following the name to find the link
-                row_context = table[match_idx : match_idx + 1000]
+        for row in rows:
+            # Check if any watchlist item is in this SPECIFIC row
+            found_target = next((t for t in WATCHLIST if t.upper() in row.upper()), None)
+            
+            if found_target:
+                # Look for PDF link only within this specific row
+                pdf_match = re.search(r'HREF=["\'](.*?\.PDF)["\']', row, re.IGNORECASE)
                 
-                # REFINED LINK EXTRACTION: Handles ' or " and various formats
-                pdf_match = re.search(r'href=["\'](.*?\.pdf)["\']', row_context, re.IGNORECASE)
-                
-                if not pdf_match:
-                    print(f"Match found for {target}, but no PDF link detected in this row. Skipping.")
-                    continue
-
-                pdf_path = pdf_match.group(1)
-                pdf_url = f"https://www.bseindia.com{pdf_path}" if pdf_path.startswith('/') else pdf_path
-                
-                # Unique ID for duplicate check
-                alert_id = str(hash(pdf_url))
-                if alert_id in sent_list: continue
-
-                print(f"New PDF found for {target}: {pdf_url}")
-
-                try:
-                    pdf_res = requests.get(pdf_url, headers=headers, timeout=20)
-                    f = BytesIO(pdf_res.content)
-                    reader = pypdf.PdfReader(f)
-                    pdf_text = "".join([p.extract_text() or "" for p in reader.pages[:3]])
-
-                    prompt = f"""
-                    Analyze this BSE filing for {target}.
-                    Context: {row_context[:300]}
-                    PDF Text: {pdf_text[:4000]}
+                if pdf_match:
+                    pdf_path = pdf_match.group(1)
+                    pdf_url = f"https://www.bseindia.com{pdf_path}" if pdf_path.startswith('/') else pdf_path
                     
-                    If this is a routine meeting notice or old news, reply 'IGNORE'.
-                    If there is a major announcement (CEO change, large order value, default), 
-                    summarize it in one clear sentence.
-                    """
-                    
-                    ai_res = client.models.generate_content(model='gemini-3.1-flash', contents=prompt)
-                    summary = ai_res.text.strip()
+                    alert_id = str(hash(pdf_url))
+                    if alert_id in sent_list: continue
 
-                    if "IGNORE" not in summary.upper():
-                        msg = f"🚨 *Deep Alert: {target}*\n\n{summary}\n\n🔗 [Official PDF]({pdf_url})"
-                        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
-                                      json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "Markdown"})
-                        save_sent(alert_id)
-                        print(f"✅ Alert sent!")
-                    
-                    time.sleep(5)
+                    print(f"🎯 Target Found: {found_target}. Processing PDF: {pdf_url}")
 
-                except Exception as e:
-                    print(f"Error reading PDF for {target}: {e}")
+                    try:
+                        pdf_res = requests.get(pdf_url, headers=headers, timeout=20)
+                        f = BytesIO(pdf_res.content)
+                        reader = pypdf.PdfReader(f)
+                        pdf_text = "".join([p.extract_text() or "" for p in reader.pages[:3]])
+
+                        prompt = f"""
+                        Analyze this BSE filing for {found_target}.
+                        PDF Text Snippet: {pdf_text[:4000]}
+                        
+                        Rule: If this is a routine notice (holiday, board meeting date only), reply 'IGNORE'.
+                        Rule: If there is a management change (CEO/Director), order win, or acquisition, 
+                        summarize the specific impact in one clear sentence.
+                        """
+                        
+                        ai_res = client.models.generate_content(model='gemini-3.1-flash', contents=prompt)
+                        summary = ai_res.text.strip()
+
+                        if "IGNORE" not in summary.upper():
+                            msg = f"🚨 *Deep Alert: {found_target}*\n\n{summary}\n\n🔗 [Official PDF]({pdf_url})"
+                            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
+                                          json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "Markdown"})
+                            save_sent(alert_id)
+                            print(f"✅ Alert sent for {found_target}")
+                        
+                        time.sleep(2) # Slight delay to be polite to the server
+                    except Exception as e:
+                        print(f"PDF error for {found_target}: {e}")
+                else:
+                    # This explains why Reliance "failed" before—it found the name in a non-link row
+                    print(f"Found {found_target} in a row, but no PDF link exists there. Moving to next row...")
 
     except Exception as e:
         print(f"Scraper encountered a problem: {e}")
