@@ -1,13 +1,13 @@
 from seleniumbase import Driver
 from google import genai
-import os
-import time
-import re
+import os, time, re, requests
 from io import BytesIO
 import pypdf
-import requests
 
-WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "MIDWEST", "SADHANA"]
+# --- CONFIGURATION ---
+# Focus on the core list + RailTel (Code: 543265)
+WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "RAILTEL", "543265", "544587"]
+
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TG_CHAT = os.getenv("TELEGRAM_CHAT_ID")
@@ -23,56 +23,61 @@ def save_sent(alert_id):
         f.write(f"{alert_id}\n")
 
 def analyze_and_send():
-    # Initialize Undetected Driver
+    # Use 'uc=True' to bypass BSE's anti-bot detection
     driver = Driver(browser="chrome", uc=True, headless=True)
     sent_list = get_already_sent()
     
     try:
         url = "https://www.bseindia.com/corporates/ann.html"
         driver.get(url)
-        time.sleep(10) # Wait for JS to render the table
+        time.sleep(15) # Wait for the table to fully populate
 
-        # Get the actual rendered HTML
         html = driver.page_source
-        
-        # Look for PDF links in the rendered page
-        matches = re.findall(r'href=["\'](.*?\.pdf)["\']', html, re.IGNORECASE)
-        print(f"Total PDFs found: {len(matches)}")
+        # Extract PDF links and the surrounding 600 characters of text
+        matches = re.findall(r'([\s\S]{1,600}?)href=["\'](.*?\.pdf)["\']', html, re.IGNORECASE)
+        print(f"BSE Scan Complete: {len(matches)} announcements found.")
 
-        for pdf_path in matches:
+        for context, pdf_path in matches:
             pdf_url = f"https://www.bseindia.com{pdf_path}" if pdf_path.startswith('/') else pdf_path
             
-            # Find the text near this link
-            link_pos = html.find(pdf_path)
-            context = html[max(0, link_pos-500) : min(len(html), link_pos+500)].upper()
-
-            found_target = next((t for t in WATCHLIST if t.upper() in context), None)
+            # Match against our new watchlist
+            found_target = next((t for t in WATCHLIST if t.upper() in context.upper()), None)
             
             if found_target:
                 alert_id = str(hash(pdf_url))
                 if alert_id in sent_list: continue
 
-                print(f"🎯 HIT: {found_target} -> {pdf_url}")
+                print(f"🎯 Target Identified: {found_target}. Analyzing content...")
 
                 try:
-                    # Download PDF using the driver's cookies to stay stealthy
+                    # Download PDF
                     pdf_res = requests.get(pdf_url, headers={"User-Agent": "Mozilla/5.0"})
                     f = BytesIO(pdf_res.content)
                     reader = pypdf.PdfReader(f)
                     pdf_text = "".join([p.extract_text() or "" for p in reader.pages[:3]])
 
-                    prompt = f"Analyze this filing for {found_target}. Text: {pdf_text[:3000]}. If it's a management change or major order, summarize in 1 sentence. Else reply IGNORE."
+                    # Refined Prompt for RailTel and Order Wins
+                    prompt = f"""
+                    Analyze this stock market filing for {found_target}.
+                    Text: {pdf_text[:4000]}
+                    
+                    TASK: 
+                    1. If this is a NEW ORDER, AWARD, or CONTRACT, summarize the total value (Cr) and client.
+                    2. If this is a MANAGEMENT CHANGE, summarize who joined/left.
+                    3. If it is a routine notice (Board Meeting date only, Holiday, or general compliance), reply ONLY 'IGNORE'.
+                    """
                     
                     ai_res = client.models.generate_content(model='gemini-3.1-flash', contents=prompt)
                     summary = ai_res.text.strip()
 
                     if "IGNORE" not in summary.upper():
-                        msg = f"🚨 *Deep Alert: {found_target}*\n\n{summary}\n\n🔗 [PDF]({pdf_url})"
+                        msg = f"🚀 *New Alert: {found_target}*\n\n{summary}\n\n🔗 [Official PDF]({pdf_url})"
                         requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
                                       json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "Markdown"})
                         save_sent(alert_id)
+                        print(f"✅ Alert pushed to Telegram for {found_target}")
                 except Exception as e:
-                    print(f"PDF Error: {e}")
+                    print(f"PDF Analysis Error: {e}")
 
     finally:
         driver.quit()
