@@ -19,9 +19,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Dependencies
-        # We manually list them here to avoid the "File Not Found" error
-        run: pip install requests google-genai pypdf
+      - name: Install Selenium and Dependencies
+        run: |
+          pip install seleniumbase google-genai pypdf requests
+          sbase install chromedriver
 
       - name: Run Scraper
         env:
@@ -34,8 +35,7 @@ jobs:
         run: |
           git config --global user.name 'BSE-Bot'
           git config --global user.email 'bot@bse.com'
-          # We create the file if it doesn't exist so git doesn't error out
           touch sent_alerts.txt
           git add sent_alerts.txt
-          git commit -m "Update sent alerts history [skip ci]" || echo "No changes to commit"
-          git push || echo "No changes to push"
+          git commit -m "Update history [skip ci]" || echo "No changes"
+          git push || echo "No changes"
