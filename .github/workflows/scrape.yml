@@ -9,7 +9,7 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Needed to save the sent_alerts.txt state
+      contents: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -20,7 +20,8 @@ jobs:
           python-version: '3.11'
 
       - name: Install Dependencies
-        run: pip install -r requirements.txt
+        # We manually list them here to avoid the "File Not Found" error
+        run: pip install requests google-genai pypdf
 
       - name: Run Scraper
         env:
@@ -33,6 +34,8 @@ jobs:
         run: |
           git config --global user.name 'BSE-Bot'
           git config --global user.email 'bot@bse.com'
-          git add sent_alerts.txt || true
-          git commit -m "Update sent alerts history [skip ci]" || true
-          git push || true
+          # We create the file if it doesn't exist so git doesn't error out
+          touch sent_alerts.txt
+          git add sent_alerts.txt
+          git commit -m "Update sent alerts history [skip ci]" || echo "No changes to commit"
+          git push || echo "No changes to push"
