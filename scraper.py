@@ -5,9 +5,9 @@ import time
 from datetime import datetime
 from io import BytesIO
 import pypdf
+import re # Added for flexible link searching
 
 # --- CONFIGURATION ---
-# Watchlist supports Company Names or Security Codes
 WATCHLIST = ["WAAREE", "RELIANCE", "TATA", "INFOSYS", "ADANI", "MIDWEST", "544587"]
 
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
@@ -16,11 +16,9 @@ TG_CHAT = os.getenv("TELEGRAM_CHAT_ID")
 client = genai.Client(api_key=GEMINI_KEY)
 
 def is_market_time():
-    # Indian Standard Time (IST) is UTC + 5:30.
-    # 6:00 AM IST = 12:30 AM UTC | 12:00 AM IST = 6:30 PM UTC
     now_utc = datetime.utcnow()
-    # Check if UTC hour is between 0 (12:30am IST) and 18 (11:30pm IST)
-    return 0 <= now_utc.hour <= 18
+    # 6 AM - 12 AM IST is approx 0:30 to 18:30 UTC
+    return 0 <= now_utc.hour <= 19
 
 def get_already_sent():
     if not os.path.exists("sent_alerts.txt"): return set()
@@ -33,7 +31,7 @@ def save_sent(alert_id):
 
 def analyze_and_send():
     if not is_market_time():
-        print("Outside 6 AM - 12 AM IST window. Skipping.")
+        print("Outside market hours. Skipping.")
         return
 
     url = "https://www.bseindia.com/corporates/ann.html"
@@ -44,39 +42,47 @@ def analyze_and_send():
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code != 200: return
 
-        # TABLE ISOLATION
-        html = response.text.upper()
-        table = html.split("TBDATAMAIN")[1].split("</TABLE")[0] if "TBDATAMAIN" in html else html
+        html = response.text
+        # Look for the main data table
+        table = html.split("TBDATAMAIN")[1].split("</TABLE")[0] if "TBDATAMAIN" in html.upper() else html
 
         for target in WATCHLIST:
-            if target in table:
-                idx = table.find(target)
-                # Capture the row context
-                row_snippet = table[max(0, idx-100) : min(len(table), idx+500)]
-                alert_id = str(hash(row_snippet))
+            if target.upper() in table.upper():
+                # Find exactly where the company is mentioned
+                match_idx = table.upper().find(target.upper())
+                # Look at the 1000 characters following the name to find the link
+                row_context = table[match_idx : match_idx + 1000]
+                
+                # REFINED LINK EXTRACTION: Handles ' or " and various formats
+                pdf_match = re.search(r'href=["\'](.*?\.pdf)["\']', row_context, re.IGNORECASE)
+                
+                if not pdf_match:
+                    print(f"Match found for {target}, but no PDF link detected in this row. Skipping.")
+                    continue
 
+                pdf_path = pdf_match.group(1)
+                pdf_url = f"https://www.bseindia.com{pdf_path}" if pdf_path.startswith('/') else pdf_path
+                
+                # Unique ID for duplicate check
+                alert_id = str(hash(pdf_url))
                 if alert_id in sent_list: continue
 
+                print(f"New PDF found for {target}: {pdf_url}")
+
                 try:
-                    # EXTRACT PDF LINK
-                    pdf_path = row_snippet.split('HREF="')[1].split('"')[0].lower()
-                    pdf_url = f"https://www.bseindia.com{pdf_path}"
-                    
-                    print(f"Deep Scanning PDF for {target}...")
-                    pdf_res = requests.get(pdf_url, headers=headers)
+                    pdf_res = requests.get(pdf_url, headers=headers, timeout=20)
                     f = BytesIO(pdf_res.content)
                     reader = pypdf.PdfReader(f)
-                    pdf_text = "".join([p.extract_text() for p in reader.pages[:3]])
+                    pdf_text = "".join([p.extract_text() or "" for p in reader.pages[:3]])
 
-                    # AI ANALYSIS
                     prompt = f"""
-                    Analyze this Indian Stock Market filing for {target}.
-                    Headline: {row_snippet[:200]}
-                    PDF Content: {pdf_text[:4000]}
+                    Analyze this BSE filing for {target}.
+                    Context: {row_context[:300]}
+                    PDF Text: {pdf_text[:4000]}
                     
-                    Rule 1: If it's a routine board meeting date, newspaper ad, or holiday, reply 'IGNORE'.
-                    Rule 2: If there's a CEO change, a large order (Cr value), a default, or an acquisition, 
-                    summarize the REAL impact in one concise sentence. Avoid jargon.
+                    If this is a routine meeting notice or old news, reply 'IGNORE'.
+                    If there is a major announcement (CEO change, large order value, default), 
+                    summarize it in one clear sentence.
                     """
                     
                     ai_res = client.models.generate_content(model='gemini-3.1-flash', contents=prompt)
@@ -87,15 +93,15 @@ def analyze_and_send():
                         requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
                                       json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "Markdown"})
                         save_sent(alert_id)
-                        print(f"✅ Alert sent for {target}")
+                        print(f"✅ Alert sent!")
                     
-                    time.sleep(5) # Rate limiting
+                    time.sleep(5)
 
                 except Exception as e:
-                    print(f"PDF Error for {target}: {e}")
+                    print(f"Error reading PDF for {target}: {e}")
 
     except Exception as e:
-        print(f"Scraper error: {e}")
+        print(f"Scraper encountered a problem: {e}")
 
 if __name__ == "__main__":
     analyze_and_send()
