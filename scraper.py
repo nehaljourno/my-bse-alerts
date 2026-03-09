@@ -97,7 +97,7 @@ def announcement_id(ann: dict) -> str:
 
 
 def get_attachment_url(ann: dict):
-    fname = ann.get("ATTACHMENTNAME", "").strip()
+    fname = str(ann.get("ATTACHMENTNAME") or "").strip()
     return (BSE_DOC_BASE + fname) if fname else None
 
 
@@ -158,6 +158,16 @@ def main():
     announcements = fetch_announcements(lookback_minutes=15)
     print(f"  Fetched {len(announcements)} announcements from BSE")
 
+    # ── DEBUG: print raw fields from every announcement ──────────────────────
+    print("  DEBUG — all announcements returned by BSE API:")
+    for i, ann in enumerate(announcements):
+        company_name = str(ann.get("SLONGNAME") or ann.get("SSHORTNAME") or "").strip()
+        scrip_code   = str(ann.get("SCRIP_CD") or "").strip()
+        headline     = str(ann.get("NEWSSUB") or "").strip()
+        print(f"    [{i+1}] code='{scrip_code}'  company='{company_name}'  headline='{headline[:60]}'")
+    print(f"  DEBUG — companies in your watchlist: {list(companies.keys())}")
+    # ─────────────────────────────────────────────────────────────────────────
+
     hits = 0
     for ann in announcements:
         ann_id = announcement_id(ann)
@@ -213,7 +223,7 @@ def main():
     save_seen(seen)
     print(f"  Done. {hits} hit(s) found. Seen cache: {len(seen)} entries.")
 
-    # Test message to confirm bot is working
+    # Test message — remove this line once alerts are working
     send_telegram("👋 Hello! BSE scraper ran successfully and is set up correctly.")
 
 
