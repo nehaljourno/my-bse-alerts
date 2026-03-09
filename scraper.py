@@ -235,9 +235,6 @@ def main():
     save_seen(seen)
     print(f"  Done. {hits} hit(s) found. Seen cache: {len(seen)} entries.")
 
-    # Test message — remove once alerts are working correctly
-    send_telegram("👋 Hello! BSE scraper ran successfully and is set up correctly.")
-
 
 if __name__ == "__main__":
     main()
