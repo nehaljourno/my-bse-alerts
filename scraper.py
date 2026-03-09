@@ -158,14 +158,14 @@ def main():
     announcements = fetch_announcements(lookback_minutes=15)
     print(f"  Fetched {len(announcements)} announcements from BSE")
 
-    # ── DEBUG: print raw fields from every announcement ──────────────────────
+    # ── DEBUG: print all announcements ───────────────────────────────────────
     print("  DEBUG — all announcements returned by BSE API:")
     for i, ann in enumerate(announcements):
         company_name = str(ann.get("SLONGNAME") or ann.get("SSHORTNAME") or "").strip()
         scrip_code   = str(ann.get("SCRIP_CD") or "").strip()
         headline     = str(ann.get("NEWSSUB") or "").strip()
         print(f"    [{i+1}] code='{scrip_code}'  company='{company_name}'  headline='{headline[:60]}'")
-    print(f"  DEBUG — companies in your watchlist: {list(companies.keys())}")
+    print(f"  DEBUG — watchlist keys: {list(companies.keys())}")
     # ─────────────────────────────────────────────────────────────────────────
 
     hits = 0
@@ -197,16 +197,25 @@ def main():
         hits += 1
         print(f"  HIT: {matched_display} — {headline}")
 
+        # Log the raw attachment field so we can debug missing attachments
+        attach_name = str(ann.get("ATTACHMENTNAME") or "").strip()
+        print(f"    ATTACHMENTNAME='{attach_name}'")
+        print(f"    All API fields: {dict(ann)}")
+
         summary    = headline
         attach_url = get_attachment_url(ann)
-        if attach_url:
+
+        if not attach_url:
+            print(f"    [WARN] No attachment found in API response — using headline as summary")
+        else:
             try:
                 print(f"    Downloading: {attach_url}")
                 content, mime = download_attachment(attach_url)
+                print(f"    Downloaded {len(content)} bytes  mime='{mime}'")
                 summary = summarise_with_gemini(content, mime, matched_display, headline)
                 print(f"    AI Summary: {summary}")
             except Exception as e:
-                print(f"    [WARN] Could not process attachment: {e}")
+                print(f"    [WARN] Attachment processing failed: {e}")
 
         time_str = dt_tm[:16] if len(dt_tm) >= 16 else dt_tm
         message = (
@@ -223,7 +232,7 @@ def main():
     save_seen(seen)
     print(f"  Done. {hits} hit(s) found. Seen cache: {len(seen)} entries.")
 
-    # Test message — remove this line once alerts are working
+    # Test message — remove once alerts are working correctly
     send_telegram("👋 Hello! BSE scraper ran successfully and is set up correctly.")
 
 
