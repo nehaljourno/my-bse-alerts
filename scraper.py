@@ -140,12 +140,23 @@ def summarise_with_gemini(content: bytes, mime_type: str, company: str, headline
 
 def send_telegram(message: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    resp = requests.post(url, json={
-        "chat_id":    TELEGRAM_CHAT_ID,
-        "text":       message,
-        "parse_mode": "HTML",
-    }, timeout=15)
-    resp.raise_for_status()
+    # Try HTML first; if Telegram rejects it, fall back to plain text
+    try:
+        resp = requests.post(url, json={
+            "chat_id":    TELEGRAM_CHAT_ID,
+            "text":       message,
+            "parse_mode": "HTML",
+        }, timeout=15)
+        resp.raise_for_status()
+    except Exception:
+        # Strip HTML tags and retry as plain text
+        import re
+        plain = re.sub(r"<[^>]+>", "", message)
+        resp = requests.post(url, json={
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text":    plain,
+        }, timeout=15)
+        resp.raise_for_status()
     print(f"[TELEGRAM] Sent: {message}")
 
 
