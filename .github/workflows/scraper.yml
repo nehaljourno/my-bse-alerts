@@ -39,7 +39,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
-        run: python scraper.py
+        run: python test_telegram.py
 
       - name: Commit updated seen-announcements cache
         run: |
