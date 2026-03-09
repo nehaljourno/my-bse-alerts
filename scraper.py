@@ -39,7 +39,7 @@ HEADERS = {
 
 # Initialise Gemini client
 client = genai.Client(api_key=GEMINI_API_KEY)
-GEMINI_MODEL = "gemini-2.0-flash-001"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
