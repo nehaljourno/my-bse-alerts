@@ -1,5 +1,50 @@
-- name: Run scraper
-  env:
-    TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-    TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-  run: python test_telegram.py
+name: BSE Announcement Scraper
+
+on:
+  schedule:
+    # Every 10 minutes, every day (including Sunday), 06:00–00:00 IST (00:30–18:30 UTC)
+    - cron: "*/10 0-18 * * *"
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # Needed to commit the seen_announcements.json cache back
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scraper
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
+        run: python scraper.py
+
+      - name: Commit updated seen-announcements cache
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add seen_announcements.json
+          git diff --cached --quiet || git commit -m "chore: update seen announcements cache [skip ci]"
+          git push
