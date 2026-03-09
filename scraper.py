@@ -164,6 +164,7 @@ def main():
         company_name = str(ann.get("SLONGNAME") or ann.get("SSHORTNAME") or "").strip()
         scrip_code   = str(ann.get("SCRIP_CD") or "").strip()
         headline     = str(ann.get("NEWSSUB") or "").strip()
+        bse_headline = str(ann.get("HEADLINE") or "").strip()  # richer fallback field
         print(f"    [{i+1}] code='{scrip_code}'  company='{company_name}'  headline='{headline[:60]}'")
     print(f"  DEBUG — watchlist keys: {list(companies.keys())}")
     # ─────────────────────────────────────────────────────────────────────────
@@ -178,6 +179,7 @@ def main():
         company_name = str(ann.get("SLONGNAME") or ann.get("SSHORTNAME") or "").strip()
         scrip_code   = str(ann.get("SCRIP_CD") or "").strip()
         headline     = str(ann.get("NEWSSUB") or "").strip()
+        bse_headline = str(ann.get("HEADLINE") or "").strip()  # richer fallback field
         dt_tm        = str(ann.get("DT_TM") or "").strip()
 
         matched_display = None
@@ -200,9 +202,9 @@ def main():
         # Log the raw attachment field so we can debug missing attachments
         attach_name = str(ann.get("ATTACHMENTNAME") or "").strip()
         print(f"    ATTACHMENTNAME='{attach_name}'")
-        print(f"    All API fields: {dict(ann)}")
 
-        summary    = headline
+        # Use the richer HEADLINE field as fallback if available
+        summary = bse_headline if bse_headline else headline
         attach_url = get_attachment_url(ann)
 
         if not attach_url:
