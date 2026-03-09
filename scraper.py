@@ -39,7 +39,7 @@ HEADERS = {
 
 # Initialise Gemini client
 client = genai.Client(api_key=GEMINI_API_KEY)
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-2.0-flash-001"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -159,17 +159,6 @@ def main():
     announcements = fetch_announcements(lookback_minutes=15)
     print(f"  Fetched {len(announcements)} announcements from BSE")
 
-    # ── DEBUG: print all announcements ───────────────────────────────────────
-    print("  DEBUG — all announcements returned by BSE API:")
-    for i, ann in enumerate(announcements):
-        company_name = str(ann.get("SLONGNAME") or ann.get("SSHORTNAME") or "").strip()
-        scrip_code   = str(ann.get("SCRIP_CD") or "").strip()
-        headline     = str(ann.get("NEWSSUB") or "").strip()
-        bse_headline = str(ann.get("HEADLINE") or "").strip()  # richer fallback field
-        print(f"    [{i+1}] code='{scrip_code}'  company='{company_name}'  headline='{headline[:60]}'")
-    print(f"  DEBUG — watchlist keys: {list(companies.keys())}")
-    # ─────────────────────────────────────────────────────────────────────────
-
     hits = 0
     for ann in announcements:
         ann_id = announcement_id(ann)
@@ -180,7 +169,7 @@ def main():
         company_name = str(ann.get("SLONGNAME") or ann.get("SSHORTNAME") or "").strip()
         scrip_code   = str(ann.get("SCRIP_CD") or "").strip()
         headline     = str(ann.get("NEWSSUB") or "").strip()
-        bse_headline = str(ann.get("HEADLINE") or "").strip()  # richer fallback field
+        bse_headline = str(ann.get("HEADLINE") or "").strip()
         dt_tm        = str(ann.get("DT_TM") or "").strip()
 
         matched_display = None
@@ -200,21 +189,14 @@ def main():
         hits += 1
         print(f"  HIT: {matched_display} — {headline}")
 
-        # Log the raw attachment field so we can debug missing attachments
-        attach_name = str(ann.get("ATTACHMENTNAME") or "").strip()
-        print(f"    ATTACHMENTNAME='{attach_name}'")
-
-        # Use the richer HEADLINE field as fallback if available
-        summary = bse_headline if bse_headline else headline
+        # Use the richer HEADLINE field as fallback if Gemini fails
+        summary    = bse_headline if bse_headline else headline
         attach_url = get_attachment_url(ann)
 
-        if not attach_url:
-            print(f"    [WARN] No attachment found in API response — using headline as summary")
-        else:
+        if attach_url:
             try:
                 print(f"    Downloading: {attach_url}")
                 content, mime = download_attachment(attach_url)
-                print(f"    Downloaded {len(content)} bytes  mime='{mime}'")
                 summary = summarise_with_gemini(content, mime, matched_display, headline)
                 print(f"    AI Summary: {summary}")
             except Exception as e:
