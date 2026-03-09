@@ -2,9 +2,8 @@ name: BSE Announcement Scraper
 
 on:
   schedule:
-    # Runs every 10 minutes during Indian market hours (Mon–Fri, 09:00–17:00 IST = 03:30–11:30 UTC)
-    # GitHub Actions cron minimum is 5 minutes; we use 10.
-    - cron: "*/10 3-11 * * 1-5"
+    # Every 10 minutes, every day (including Sunday), 06:00–00:00 IST (00:30–18:30 UTC)
+    - cron: "*/10 0-18 * * *"
   workflow_dispatch:  # Allow manual trigger from GitHub UI
 
 jobs:
@@ -39,7 +38,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
         run: python scraper.py
 
       - name: Commit updated seen-announcements cache
