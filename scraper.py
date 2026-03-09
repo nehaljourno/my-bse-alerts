@@ -112,8 +112,9 @@ def summarise_with_gemini(content: bytes, mime_type: str, company: str, headline
     prompt = (
         f"Company: {company}\n"
         f"BSE Headline: {headline}\n\n"
-        "Summarise the key fact from this announcement in ONE concise sentence "
-        "(max 25 words). Focus on the most material information for an investor."
+        "You are a journalist with the biggest pink-sheet newspaper in India. "
+        "See the following announcement and summarize the news value of it in one concise sentence. "
+        "Do not focus on what the company wants to say, but on the news value."
     )
 
     if "pdf" in mime_type:
