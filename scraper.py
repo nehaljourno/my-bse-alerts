@@ -228,6 +228,9 @@ def main():
     save_seen(seen)
     print(f"  Done. {hits} hit(s) found. Seen cache: {len(seen)} entries.")
 
+    if hits == 0:
+        send_telegram("🔍 Scanned BSE but found no new updates.")
+
 
 if __name__ == "__main__":
     main()
