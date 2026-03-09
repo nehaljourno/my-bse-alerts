@@ -113,7 +113,15 @@ def summarise_with_gemini(content: bytes, mime_type: str, company: str, headline
         f"Company: {company}\n"
         f"BSE Headline: {headline}\n\n"
         "You are a journalist with the biggest pink-sheet newspaper in India. "
-        "See the following announcement and summarize the news value of it in one concise sentence. "
+        "First, decide if this announcement has genuine news value. "
+        "DISCARD routine announcements with no news value such as: closure of trading window, "
+        "investor meets, transfer and dematerialisation of physical shares, change of address, "
+        "ISIN updates, compliance filings, or any other administrative/regulatory routine. "
+        "REPORT announcements that have genuine news value such as: press releases, acquisitions, "
+        "mergers, board appointments or resignations, financial results, investor presentations, "
+        "new orders, joint ventures, fundraising, or any material business development. "
+        "If you decide to DISCARD, respond with exactly the word: DISCARD\n"
+        "If you decide to REPORT, respond with one concise sentence summarising the news value. "
         "Do not focus on what the company wants to say, but on the news value."
     )
 
@@ -213,6 +221,11 @@ def main():
             except Exception as e:
                 print(f"    [WARN] Attachment processing failed: {e}")
 
+        # Skip routine announcements flagged by Gemini
+        if summary.strip().upper() == "DISCARD":
+            print(f"    Skipping — Gemini flagged as routine announcement")
+            continue
+
         time_str = dt_tm[:16] if len(dt_tm) >= 16 else dt_tm
         message = (
             f"🔔 <b>{matched_display}</b> [{scrip_code}]\n"
@@ -228,8 +241,7 @@ def main():
     save_seen(seen)
     print(f"  Done. {hits} hit(s) found. Seen cache: {len(seen)} entries.")
 
-    if hits == 0:
-        send_telegram("🔍 Scanned BSE but found no new updates.")
+
 
 
 if __name__ == "__main__":
