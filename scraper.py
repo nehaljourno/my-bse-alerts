@@ -12,10 +12,10 @@ import time
 import requests
 import csv
 import hashlib
-import base64
 from datetime import datetime, timedelta
 from pathlib import Path
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 # ── Config ────────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -38,8 +38,8 @@ HEADERS = {
 }
 
 # Initialise Gemini client
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+client = genai.Client(api_key=GEMINI_API_KEY)
+GEMINI_MODEL = "gemini-2.0-flash"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -117,22 +117,21 @@ def summarise_with_gemini(content: bytes, mime_type: str, company: str, headline
     )
 
     if "pdf" in mime_type:
-        response = model.generate_content([
-            {
-                "inline_data": {
-                    "mime_type": "application/pdf",
-                    "data": base64.b64encode(content).decode("utf-8"),
-                }
-            },
-            prompt,
-        ])
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                types.Part.from_bytes(data=content, mime_type="application/pdf"),
+                prompt,
+            ],
+        )
     else:
         try:
             text_content = content.decode("utf-8", errors="replace")
         except Exception:
             text_content = content.decode("latin-1", errors="replace")
-        response = model.generate_content(
-            f"{prompt}\n\nAnnouncement content:\n{text_content[:8000]}"
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=f"{prompt}\n\nAnnouncement content:\n{text_content[:8000]}",
         )
 
     return response.text.strip()
@@ -166,10 +165,10 @@ def main():
             continue
         seen.add(ann_id)
 
-        company_name = ann.get("SLONGNAME", ann.get("SSHORTNAME", "")).strip()
-        scrip_code   = ann.get("SCRIP_CD", "").strip()
-        headline     = ann.get("NEWSSUB", "").strip()
-        dt_tm        = ann.get("DT_TM", "").strip()
+        company_name = str(ann.get("SLONGNAME") or ann.get("SSHORTNAME") or "").strip()
+        scrip_code   = str(ann.get("SCRIP_CD") or "").strip()
+        headline     = str(ann.get("NEWSSUB") or "").strip()
+        dt_tm        = str(ann.get("DT_TM") or "").strip()
 
         matched_display = None
         if company_name.lower() in companies:
