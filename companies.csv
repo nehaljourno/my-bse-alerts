@@ -1,19 +1,113 @@
-company_name,bse_code
-Reliance Industries,500325
-Larsen & Toubro,500510
-Tata Steel,500470
-JSW Steel,500228
-Vedanta,500295
-Adani Enterprises,512599
-Adani Ports and Special Economic Zone,532921
-Adani Power,533096
-Adani Energy Solutions,539254
-Adani Green Energy,541450
-Adani Total Gas,542066
-Ambuja Cements,500425
-UltraTech Cement,532538
-Hindalco Industries,500440 
-Tata Motors,544569
-Tata Motors Passenger Vehicles,500570
-Tata Consultancy Services,532540
-Raymond Realty,544420 
+company_name,bse_code,nse_symbol
+Reliance Industries,500325,RELIANCE
+HDFC Bank,500180,HDFCBANK
+Bharti Airtel,532454,BHARTIARTL
+State Bank of India,500112,SBIN
+ICICI Bank,532174,ICICIBANK
+Tata Consultancy Services,532540,TCS
+Bajaj Finance,500034,BAJFINANCE
+Larsen & Toubro,500510,LT
+Hindustan Unilever,500696,HINDUNILVR
+Infosys,500209,INFY
+Maruti Suzuki,532500,MARUTI
+Axis Bank,532215,AXISBANK
+Mahindra and Mahindra,500520,M&M
+Sun Pharmaceutical Industries,524715,SUNPHARMA
+Kotak Mahindra Bank,500247,KOTAKBANK
+ITC,500875,ITC
+Titan Company,500114,TITAN
+UltraTech Cement,532538,ULTRACEMCO
+HCL Technologies,532281,HCLTECH
+NTPC,532555,NTPC
+Adani Ports,532921,ADANIPORTS
+Oil & Natural Gas Corporation,500312,ONGC
+Bharat Electronics,500049,BEL
+Wipro,507685,WIPRO
+Asian Paints,500820,ASIANPAINT
+Adani Enterprises,512599,ADANIENT
+Coal India,533278,COALINDIA
+Tata Steel,500470,TATASTEEL
+Hindalco Industries,500440,HINDALCO
+HDFC Life Insurance,540777,HDFCLIFE
+SBI Life Insurance,540719,SBILIFE
+Bajaj Finserv,532978,BAJAJFINSV
+Tech Mahindra,532755,TECHM
+Nestle India,500790,NESTLEIND
+Tata Consumer Products,500800,TATACONSUM
+Power Grid Corporation,532898,POWERGRID
+IndusInd Bank,532187,INDUSINDBK
+Hero MotoCorp,500182,HEROMOTOCO
+Bajaj Auto,532977,BAJAJ-AUTO
+Cipla,500087,CIPLA
+Grasim Industries,500300,GRASIM
+Britannia Industries,500825,BRITANNIA
+Dr Reddys Laboratories,500124,DRREDDY
+Dmart,540376,DMART
+Trent,500251,TRENT
+Vedanta,500295,VEDL
+Tata Motors,500570,TATAMOTORS
+JSW Steel,500228,JSWSTEEL
+Adani Power,533096,ADANIPOWER
+Apollo Hospitals,508869,APOLLOHOSP
+DLF,532868,DLF
+Bharat Petroleum,500547,BPCL
+Indian Oil Corporation,530965,IOC
+Eicher Motors,505200,EICHERMOT
+Shriram Finance,511218,SHRIRAMFIN
+LTIMindtree,540005,LTIM
+Godrej Consumer Products,532424,GODREJCP
+Divis Laboratories,532488,DIVISLAB
+Havells India,517354,HAVELLS
+Adani Green Energy,541450,ADANIGREEN
+Torrent Pharmaceuticals,500420,TORNTPHARM
+Siemens,500550,SIEMENS
+Cholamandalam Investment,511243,CHOLAFIN
+Varun Beverages,540180,VBL
+SBI Cards,543066,SBICARD
+Muthoot Finance,533398,MUTHOOTFIN
+PI Industries,523642,PIIND
+Pidilite Industries,500331,PIDILITIND
+Interglobe Aviation (IndiGo),539448,INDIGO
+Zomato,543320,ZOMATO
+Nykaa,543401,NYKAA
+AU Small Finance Bank,540611,AUBANK
+Bank of Baroda,532134,BANKBARODA
+Canara Bank,532483,CANBK
+Ambuja Cements,500425,AMBUJACEM
+Bajaj Holdings,500490,BAJAJHLDNG
+Hindustan Zinc,500188,HINDZINC
+Marico,531642,MARICO
+Godrej Properties,533150,GODREJPROP
+Lodha,543441,LODHA
+Mankind Pharma,543904,MANKIND
+Zydus Lifesciences,532321,ZYDUSLIFE
+IDFC First Bank,539437,IDFCFIRSTB
+Bandhan Bank,541153,BANDHANBNK
+Federal Bank,500469,FEDERALBNK
+Persistent Systems,533179,PERSISTENT
+Oberoi Realty,533273,OBEROIRLTY
+Tata Power,500400,TATAPOWER
+Crompton Greaves Consumer,539876,CROMPTON
+Voltas,500575,VOLTAS
+Life Insurance Corporation,543526,LICI
+Adani Total Gas,542066,ATGL
+United Spirits,532432,MCDOWELL-N
+JSW Energy,533148,JSWENERGY
+Torrent Power,532779,TORNTPOWER
+Paytm,543396,PAYTM
+Adani Green Energy,541450,ADANIGREEN
+Coforge,532541,COFORGE
+Mphasis,526299,MPHASIS
+LTTS,540115,LTTS
+Sonata Software,532221,SONATSOFTW
+Happiest Minds,543227,HAPPSTMNDS
+Zensar Technologies,504067,ZENSARTECH
+SpiceJet,500285,SPICEJET
+Ola Electric,544225,OLAELEC
+Ather Energy,544288,ATHER
+TVS Motor Company,532343,TVSMOTOR
+Hyundai Motor India,544180,HYUNDAI
+Dixon Technologies,541002,DIXON
+Syrma SGS Technology,543573,SYRMA
+Tata Elxsi,500408,TATAELXSI
+Puravankara,532891,PURVA
