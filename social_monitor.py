@@ -1,8 +1,9 @@
 """
-Social Media Monitor — Reddit + StockTwits
+Social & News Monitor — Google News RSS + StockTwits
 - Runs every 30 minutes
-- Searches Reddit (IndiaInvestments, Dalal_Street, IndianStockMarket) and StockTwits
-- If a watchlist company gets 3+ mentions OR a high-engagement post → Gemini summary → Telegram alert
+- Searches Google News RSS for each watchlist company
+- Also checks StockTwits for high-activity symbols
+- Alerts via Telegram + Gemini summary when significant chatter detected
 """
 
 import os
@@ -11,61 +12,64 @@ import time
 import requests
 import csv
 import hashlib
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from google import genai
-from google.genai import types
 
 # ── Config ────────────────────────────────────────────────────────────────────
-TELEGRAM_BOT_TOKEN  = os.environ["TELEGRAM_BOT_TOKEN"]
-TELEGRAM_CHAT_ID    = os.environ["TELEGRAM_CHAT_ID"]
-GEMINI_API_KEY      = os.environ["GEMINI_API_KEY"]
-REDDIT_CLIENT_ID    = os.environ["REDDIT_CLIENT_ID"]
-REDDIT_CLIENT_SECRET= os.environ["REDDIT_CLIENT_SECRET"]
+TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+TELEGRAM_CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
+GEMINI_API_KEY     = os.environ["GEMINI_API_KEY"]
 
 COMPANIES_FILE = "companies.csv"
 SEEN_FILE      = "seen_social.json"
+GEMINI_MODEL   = "gemini-2.5-flash"
 
 # Alert thresholds
-MIN_MENTIONS        = 3      # Alert if 3+ posts mention the company in 30 mins
-MIN_UPVOTES         = 50     # Alert if a single post has 50+ upvotes
-MIN_COMMENTS        = 10     # Alert if a single post has 10+ comments
-STOCKTWITS_MIN_MSGS = 5      # Alert if 5+ StockTwits messages in 30 mins
-
-REDDIT_SUBREDDITS = [
-    "IndiaInvestments",
-    "Dalal_Street",
-    "IndianStockMarket",
-    "india_stocks",
-    "NSEIndia",
+NEWS_MIN_ARTICLES    = 3    # Alert if 3+ new articles in 30 mins
+NEWS_KEYWORDS        = [    # Alert immediately if any article contains these
+    "acquisition", "merger", "takeover", "buyout",
+    "fraud", "raid", "arrest", "scam", "default",
+    "results", "profit", "loss", "revenue",
+    "order win", "contract", "joint venture",
+    "ipo", "fundraise", "qip", "rights issue",
+    "ceo", "md", "chairman", "resignation", "appointed",
+    "fire", "explosion", "shutdown", "recall",
+    "agreement", "tariff", "fine", "tax", "investigation",
 ]
 
-GEMINI_MODEL = "gemini-2.5-flash"
+STOCKTWITS_MIN_MSGS  = 5    # Alert if 5+ StockTwits messages in 30 mins
+STOCKTWITS_MIN_LIKES = 10   # Alert if single message gets 10+ likes
+
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+}
 
 # Initialise Gemini
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def load_companies() -> dict:
-    """Returns {search_term: display_name} for matching."""
-    companies = {}
+def load_companies() -> list[dict]:
+    """Load full company list with name, bse_code, nse_symbol."""
+    companies = []
     with open(COMPANIES_FILE, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            name = row.get("company_name", "").strip()
-            code = row.get("bse_code", "").strip()
-            nse  = row.get("nse_symbol", "").strip()
+            name   = row.get("company_name", "").strip()
+            code   = row.get("bse_code", "").strip()
+            symbol = row.get("nse_symbol", "").strip()
             if name:
-                companies[name.lower()] = name
-                # Add shortened name (first word) for better matching
-                first_word = name.split()[0].lower()
-                if len(first_word) > 4:
-                    companies[first_word] = name
-            if code:
-                companies[code] = name or code
-            if nse:
-                companies[nse.lower()] = name or nse
+                companies.append({
+                    "name":   name,
+                    "code":   code,
+                    "symbol": symbol,
+                })
     return companies
 
 
@@ -77,121 +81,149 @@ def load_seen() -> set:
 
 
 def save_seen(seen: set):
-    # Keep seen cache from growing forever — keep last 2000 entries
-    seen_list = list(seen)[-2000:]
+    # Cap at 5000 entries to avoid file growing forever
+    seen_list = list(seen)[-5000:]
     with open(SEEN_FILE, "w") as f:
         json.dump(seen_list, f)
 
 
-def match_company(text: str, companies: dict) -> str | None:
-    """Return display name if any watchlist company is mentioned in text."""
-    text_lower = text.lower()
-    for term, display in companies.items():
-        if term in text_lower:
-            return display
-    return None
+def make_id(text: str) -> str:
+    return hashlib.md5(text.encode()).hexdigest()
 
 
-# ── Reddit ────────────────────────────────────────────────────────────────────
+# ── Google News RSS ───────────────────────────────────────────────────────────
 
-def get_reddit_token() -> str:
-    resp = requests.post(
-        "https://www.reddit.com/api/v1/access_token",
-        auth=(REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET),
-        data={"grant_type": "client_credentials"},
-        headers={"User-Agent": "BSESocialMonitor/1.0"},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return resp.json()["access_token"]
-
-
-def fetch_reddit_posts(token: str, lookback_minutes: int = 35) -> list[dict]:
-    """Fetch recent posts from all monitored subreddits."""
+def fetch_google_news(company_name: str, lookback_minutes: int = 35) -> list[dict]:
+    """Fetch recent Google News articles for a company."""
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
-    headers = {
-        "Authorization": f"bearer {token}",
-        "User-Agent": "BSESocialMonitor/1.0",
-    }
-    posts = []
-    for sub in REDDIT_SUBREDDITS:
-        try:
-            url  = f"https://oauth.reddit.com/r/{sub}/new.json?limit=50"
-            resp = requests.get(url, headers=headers, timeout=15)
-            resp.raise_for_status()
-            for post in resp.json()["data"]["children"]:
-                d = post["data"]
-                created = datetime.fromtimestamp(d["created_utc"], tz=timezone.utc)
-                if created < cutoff:
-                    continue
-                posts.append({
-                    "id":        d["id"],
-                    "subreddit": sub,
-                    "title":     d.get("title", ""),
-                    "text":      d.get("selftext", ""),
-                    "upvotes":   d.get("ups", 0),
-                    "comments":  d.get("num_comments", 0),
-                    "url":       f"https://reddit.com{d.get('permalink','')}",
-                    "created":   created.isoformat(),
-                    "source":    "reddit",
-                })
-            time.sleep(0.5)  # Reddit rate limit
-        except Exception as e:
-            print(f"  [WARN] Reddit fetch failed for r/{sub}: {e}")
-    return posts
+
+    # Build search query — company name + India/BSE context
+    query = f"{company_name} stock India"
+    url   = (
+        f"https://news.google.com/rss/search"
+        f"?q={requests.utils.quote(query)}"
+        f"&hl=en-IN&gl=IN&ceid=IN:en"
+    )
+
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=20)
+        resp.raise_for_status()
+        root  = ET.fromstring(resp.content)
+        items = root.findall(".//item")
+
+        articles = []
+        for item in items:
+            title   = item.findtext("title", "")
+            link    = item.findtext("link", "")
+            pub_str = item.findtext("pubDate", "")
+
+            # Parse date
+            try:
+                from email.utils import parsedate_to_datetime
+                pub_dt = parsedate_to_datetime(pub_str)
+                if pub_dt.tzinfo is None:
+                    pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+
+            if pub_dt < cutoff:
+                continue
+
+            articles.append({
+                "id":      make_id(link or title),
+                "title":   title,
+                "link":    link,
+                "source":  "google_news",
+                "pub_dt":  pub_dt.isoformat(),
+            })
+
+        return articles
+
+    except Exception as e:
+        print(f"    [WARN] Google News fetch failed for {company_name}: {e}")
+        return []
+
+
+def has_keyword(articles: list[dict]) -> str | None:
+    """Return the keyword found if any article title contains a trigger keyword."""
+    for article in articles:
+        title_lower = article["title"].lower()
+        for kw in NEWS_KEYWORDS:
+            if kw in title_lower:
+                return kw
+    return None
 
 
 # ── StockTwits ────────────────────────────────────────────────────────────────
 
-def fetch_stocktwits(nse_symbol: str, lookback_minutes: int = 35) -> list[dict]:
-    """Fetch recent StockTwits messages for a symbol."""
+def fetch_stocktwits(symbol: str, lookback_minutes: int = 35) -> list[dict]:
+    """Fetch recent StockTwits messages for an NSE symbol."""
+    if not symbol:
+        return []
+
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
     try:
-        url  = f"https://api.stocktwits.com/api/2/streams/symbol/{nse_symbol}.json"
-        resp = requests.get(url, timeout=15)
+        url  = f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json"
+        resp = requests.get(url, headers=HEADERS, timeout=15)
         if resp.status_code == 404:
-            return []  # Symbol not on StockTwits
+            return []
         resp.raise_for_status()
+
         messages = []
         for msg in resp.json().get("messages", []):
-            created = datetime.fromisoformat(
-                msg["created_at"].replace("Z", "+00:00")
-            )
+            try:
+                created = datetime.fromisoformat(
+                    msg["created_at"].replace("Z", "+00:00")
+                )
+            except Exception:
+                continue
             if created < cutoff:
                 continue
             messages.append({
-                "id":      str(msg["id"]),
-                "text":    msg.get("body", ""),
-                "upvotes": msg.get("likes", {}).get("total", 0),
-                "comments":0,
-                "url":     f"https://stocktwits.com/symbol/{nse_symbol}",
-                "created": created.isoformat(),
-                "source":  "stocktwits",
+                "id":    str(msg["id"]),
+                "text":  msg.get("body", ""),
+                "likes": msg.get("likes", {}).get("total", 0),
+                "source":"stocktwits",
             })
         return messages
+
     except Exception as e:
-        print(f"  [WARN] StockTwits fetch failed for {nse_symbol}: {e}")
+        print(f"    [WARN] StockTwits fetch failed for {symbol}: {e}")
         return []
 
 
 # ── Gemini ────────────────────────────────────────────────────────────────────
 
-def summarise_chatter(company: str, posts: list[dict]) -> str:
-    """Ask Gemini to summarise what's being said about the company."""
-    posts_text = "\n\n".join([
-        f"Source: {p['source'].upper()} | Upvotes: {p['upvotes']} | Comments: {p.get('comments',0)}\n{p['title'] + ' — ' if p.get('title') else ''}{p['text'][:500]}"
-        for p in posts[:10]  # Cap at 10 posts
-    ])
-
+def summarise_news(company: str, articles: list[dict], trigger: str) -> str:
+    """Summarise news articles about a company."""
+    headlines = "\n".join([f"- {a['title']}" for a in articles[:10]])
     prompt = (
-        f"Company: {company}\n\n"
-        f"The following social media posts mention this company:\n\n{posts_text}\n\n"
+        f"Company: {company}\n"
+        f"Trigger: {trigger}\n\n"
+        f"Recent news headlines:\n{headlines}\n\n"
         "You are a journalist with the biggest pink-sheet newspaper in India. "
-        "Summarise what is being said about this company on social media in ONE concise sentence. "
-        "Focus on the sentiment and any specific claims or rumours being discussed. "
-        "Do not repeat the individual posts — synthesise the overall chatter into one insight."
+        "Summarise what is happening with this company based on these headlines "
+        "in ONE concise sentence. Focus on the news value, not PR speak."
     )
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt,
+    )
+    return response.text.strip()
 
+
+def summarise_stocktwits(company: str, messages: list[dict], trigger: str) -> str:
+    """Summarise StockTwits chatter about a company."""
+    posts = "\n".join([f"- {m['text'][:200]}" for m in messages[:10]])
+    prompt = (
+        f"Company: {company}\n"
+        f"Trigger: {trigger}\n\n"
+        f"Recent StockTwits messages:\n{posts}\n\n"
+        "You are a journalist with the biggest pink-sheet newspaper in India. "
+        "Summarise the sentiment and any specific claims being made about this "
+        "company on social media in ONE concise sentence. "
+        "Note if the chatter is bullish, bearish, or speculative."
+    )
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=prompt,
@@ -213,149 +245,104 @@ def send_telegram(message: str):
     except Exception:
         import re
         plain = re.sub(r"<[^>]+>", "", message)
-        resp  = requests.post(url, json={
+        requests.post(url, json={
             "chat_id": TELEGRAM_CHAT_ID,
             "text":    plain,
         }, timeout=15)
-        resp.raise_for_status()
-    print(f"[TELEGRAM] Sent: {message[:80]}...")
+    print(f"[TELEGRAM] Sent alert for: {message[:60]}...")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    print(f"[{datetime.now().isoformat()}] Starting social media monitor run…")
+    print(f"[{datetime.now().isoformat()}] Starting social/news monitor run…")
 
     companies = load_companies()
     seen      = load_seen()
+    alerts    = 0
 
-    # ── Reddit ────────────────────────────────────────────────────────────────
-    print("  Fetching Reddit posts…")
-    try:
-        token       = get_reddit_token()
-        reddit_posts = fetch_reddit_posts(token)
-        print(f"  Fetched {len(reddit_posts)} Reddit posts")
-    except Exception as e:
-        print(f"  [ERROR] Reddit auth failed: {e}")
-        reddit_posts = []
+    for company in companies:
+        name   = company["name"]
+        symbol = company["symbol"]
 
-    # Group Reddit posts by matched company
-    company_reddit: dict[str, list] = {}
-    for post in reddit_posts:
-        post_id = f"reddit-{post['id']}"
-        if post_id in seen:
-            continue
-        seen.add(post_id)
+        # ── Google News ───────────────────────────────────────────────────────
+        articles = fetch_google_news(name, lookback_minutes=35)
 
-        full_text = f"{post['title']} {post['text']}"
-        matched   = match_company(full_text, companies)
-        if not matched:
-            continue
+        # Filter out already-seen articles
+        new_articles = []
+        for a in articles:
+            art_id = f"news-{a['id']}"
+            if art_id not in seen:
+                seen.add(art_id)
+                new_articles.append(a)
 
-        if matched not in company_reddit:
-            company_reddit[matched] = []
-        company_reddit[matched].append(post)
+        if new_articles:
+            keyword = has_keyword(new_articles)
+            trigger = None
 
-    # ── StockTwits ────────────────────────────────────────────────────────────
-    print("  Fetching StockTwits messages…")
-    company_stocktwits: dict[str, list] = {}
+            if keyword:
+                trigger = f"Keyword match: '{keyword}'"
+            elif len(new_articles) >= NEWS_MIN_ARTICLES:
+                trigger = f"{len(new_articles)} new articles in 30 mins"
 
-    # Load NSE symbols from CSV
-    nse_symbols = {}
-    with open(COMPANIES_FILE, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            nse = row.get("nse_symbol", "").strip()
-            name = row.get("company_name", "").strip()
-            if nse and name:
-                nse_symbols[nse] = name
+            if trigger:
+                print(f"  NEWS HIT: {name} — {trigger}")
+                try:
+                    summary = summarise_news(name, new_articles, trigger)
+                    message = (
+                        f"📰 <b>{name}</b> — News Alert\n"
+                        f"📋 {summary}\n"
+                        f"📊 {trigger}\n"
+                        f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                    )
+                    send_telegram(message)
+                    alerts += 1
+                    time.sleep(0.5)
+                except Exception as e:
+                    print(f"    [ERROR] {e}")
 
-    for symbol, display in nse_symbols.items():
-        msgs = fetch_stocktwits(symbol, lookback_minutes=35)
-        new_msgs = []
-        for msg in msgs:
-            msg_id = f"st-{msg['id']}"
-            if msg_id in seen:
-                continue
-            seen.add(msg_id)
-            new_msgs.append(msg)
-        if new_msgs:
-            company_stocktwits[display] = new_msgs
-        time.sleep(0.3)
+        # ── StockTwits ────────────────────────────────────────────────────────
+        if symbol:
+            messages = fetch_stocktwits(symbol, lookback_minutes=35)
 
-    # ── Evaluate and alert ────────────────────────────────────────────────────
-    alerted_companies = set()
+            new_msgs = []
+            for m in messages:
+                msg_id = f"st-{m['id']}"
+                if msg_id not in seen:
+                    seen.add(msg_id)
+                    new_msgs.append(m)
 
-    # Check Reddit
-    for company, posts in company_reddit.items():
-        should_alert = False
-        reason       = ""
+            if new_msgs:
+                high_likes = [m for m in new_msgs if m["likes"] >= STOCKTWITS_MIN_LIKES]
+                trigger    = None
 
-        high_engagement = [
-            p for p in posts
-            if p["upvotes"] >= MIN_UPVOTES or p["comments"] >= MIN_COMMENTS
-        ]
+                if len(new_msgs) >= STOCKTWITS_MIN_MSGS:
+                    trigger = f"{len(new_msgs)} new StockTwits messages"
+                elif high_likes:
+                    best    = max(high_likes, key=lambda x: x["likes"])
+                    trigger = f"High-liked StockTwits post ({best['likes']} likes)"
 
-        if len(posts) >= MIN_MENTIONS:
-            should_alert = True
-            reason = f"{len(posts)} mentions on Reddit"
-        elif high_engagement:
-            should_alert = True
-            best = max(high_engagement, key=lambda x: x["upvotes"] + x["comments"])
-            reason = f"High-engagement Reddit post ({best['upvotes']} upvotes, {best['comments']} comments)"
+                if trigger:
+                    print(f"  STOCKTWITS HIT: {name} — {trigger}")
+                    try:
+                        summary = summarise_stocktwits(name, new_msgs, trigger)
+                        message = (
+                            f"💬 <b>{name}</b> — StockTwits Chatter\n"
+                            f"📋 {summary}\n"
+                            f"📊 {trigger}\n"
+                            f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                        )
+                        send_telegram(message)
+                        alerts += 1
+                        time.sleep(0.5)
+                    except Exception as e:
+                        print(f"    [ERROR] {e}")
 
-        if should_alert and company not in alerted_companies:
-            print(f"  ALERT: {company} — {reason}")
-            try:
-                summary = summarise_chatter(company, posts)
-                message = (
-                    f"🐦 <b>{company}</b> — Social Chatter\n"
-                    f"📋 {summary}\n"
-                    f"📊 {reason}\n"
-                    f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                )
-                send_telegram(message)
-                alerted_companies.add(company)
-                time.sleep(0.5)
-            except Exception as e:
-                print(f"  [ERROR] Failed to send alert for {company}: {e}")
-
-    # Check StockTwits
-    for company, msgs in company_stocktwits.items():
-        if company in alerted_companies:
-            continue
-
-        should_alert = False
-        reason       = ""
-
-        high_engagement = [m for m in msgs if m["upvotes"] >= 10]
-
-        if len(msgs) >= STOCKTWITS_MIN_MSGS:
-            should_alert = True
-            reason = f"{len(msgs)} messages on StockTwits"
-        elif high_engagement:
-            should_alert = True
-            best   = max(high_engagement, key=lambda x: x["upvotes"])
-            reason = f"High-liked StockTwits message ({best['upvotes']} likes)"
-
-        if should_alert:
-            print(f"  ALERT: {company} — {reason}")
-            try:
-                summary = summarise_chatter(company, msgs)
-                message = (
-                    f"🐦 <b>{company}</b> — Social Chatter\n"
-                    f"📋 {summary}\n"
-                    f"📊 {reason}\n"
-                    f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                )
-                send_telegram(message)
-                alerted_companies.add(company)
-                time.sleep(0.5)
-            except Exception as e:
-                print(f"  [ERROR] Failed to send alert for {company}: {e}")
+        # Be gentle with Google News rate limits
+        time.sleep(1)
 
     save_seen(seen)
-    print(f"  Done. {len(alerted_companies)} company alert(s) sent.")
+    print(f"  Done. {alerts} alert(s) sent.")
 
 
 if __name__ == "__main__":
