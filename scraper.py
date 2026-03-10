@@ -4,6 +4,7 @@ BSE Corporate Announcement Scraper
 - Matches against your watchlist in companies.csv
 - Uses Gemini AI to summarise the attached PDF/XML
 - Sends a one-line alert via Telegram
+- Sends a "slow day" message if no alerts for 6 hours
 """
 
 import os
@@ -22,8 +23,11 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
 GEMINI_API_KEY     = os.environ["GEMINI_API_KEY"]
 
-COMPANIES_FILE = "companies.csv"
-SEEN_FILE      = "seen_announcements.json"
+COMPANIES_FILE  = "companies.csv"
+SEEN_FILE       = "seen_announcements.json"
+LAST_ALERT_FILE = "last_alert.json"   # tracks when we last sent a real alert
+
+SLOW_DAY_HOURS  = 6    # send "slow day" message after this many hours of silence
 
 BSE_API_URL  = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
 BSE_DOC_BASE = "https://www.bseindia.com/xml-data/corpfiling/AttachLive/"
@@ -69,7 +73,24 @@ def save_seen(seen: set):
         json.dump(list(seen), f, indent=2)
 
 
-def fetch_announcements(lookback_minutes: int = 15) -> list:
+def load_last_alert_time() -> datetime | None:
+    """Return the datetime of the last real alert sent, or None."""
+    if Path(LAST_ALERT_FILE).exists():
+        with open(LAST_ALERT_FILE) as f:
+            data = json.load(f)
+            ts = data.get("last_alert")
+            if ts:
+                return datetime.fromisoformat(ts)
+    return None
+
+
+def save_last_alert_time():
+    """Save current time as the last alert time."""
+    with open(LAST_ALERT_FILE, "w") as f:
+        json.dump({"last_alert": datetime.now().isoformat()}, f)
+
+
+def fetch_announcements(lookback_minutes: int = 10) -> list:
     now   = datetime.now()
     from_ = now - timedelta(minutes=lookback_minutes)
     params = {
@@ -148,7 +169,6 @@ def summarise_with_gemini(content: bytes, mime_type: str, company: str, headline
 
 def send_telegram(message: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    # Try HTML first; if Telegram rejects it, fall back to plain text
     try:
         resp = requests.post(url, json={
             "chat_id":    TELEGRAM_CHAT_ID,
@@ -157,7 +177,6 @@ def send_telegram(message: str):
         }, timeout=15)
         resp.raise_for_status()
     except Exception:
-        # Strip HTML tags and retry as plain text
         import re
         plain = re.sub(r"<[^>]+>", "", message)
         resp = requests.post(url, json={
@@ -165,7 +184,7 @@ def send_telegram(message: str):
             "text":    plain,
         }, timeout=15)
         resp.raise_for_status()
-    print(f"[TELEGRAM] Sent: {message}")
+    print(f"[TELEGRAM] Sent: {message[:80]}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -175,10 +194,11 @@ def main():
 
     companies     = load_companies()
     seen          = load_seen()
-    announcements = fetch_announcements(lookback_minutes=15)
+    announcements = fetch_announcements(lookback_minutes=10)
     print(f"  Fetched {len(announcements)} announcements from BSE")
 
-    hits = 0
+    real_alerts = 0
+
     for ann in announcements:
         ann_id = announcement_id(ann)
         if ann_id in seen:
@@ -205,7 +225,6 @@ def main():
         if not matched_display:
             continue
 
-        hits += 1
         print(f"  HIT: {matched_display} — {headline}")
 
         # Use the richer HEADLINE field as fallback if Gemini fails
@@ -234,14 +253,27 @@ def main():
         )
         try:
             send_telegram(message)
+            save_last_alert_time()
+            real_alerts += 1
             time.sleep(0.5)
         except Exception as e:
             print(f"    [ERROR] Telegram send failed: {e}")
 
+    # ── Slow day check ────────────────────────────────────────────────────────
+    if real_alerts == 0:
+        last_alert = load_last_alert_time()
+        silence_threshold = datetime.now() - timedelta(hours=SLOW_DAY_HOURS)
+
+        if last_alert is None or last_alert < silence_threshold:
+            try:
+                send_telegram("🔕 Scraper is working, it's just a slow day.")
+                save_last_alert_time()
+                print(f"  Sent slow day message (no alerts for {SLOW_DAY_HOURS}+ hours)")
+            except Exception as e:
+                print(f"  [ERROR] Slow day message failed: {e}")
+
     save_seen(seen)
-    print(f"  Done. {hits} hit(s) found. Seen cache: {len(seen)} entries.")
-
-
+    print(f"  Done. {real_alerts} real alert(s) sent. Seen cache: {len(seen)} entries.")
 
 
 if __name__ == "__main__":
