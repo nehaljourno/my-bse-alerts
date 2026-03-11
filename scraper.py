@@ -24,7 +24,7 @@ TELEGRAM_CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
 GEMINI_API_KEY     = os.environ["GEMINI_API_KEY"]
 
 COMPANIES_FILE  = "companies.csv"
-SEEN_FILE       = "seen_announcements.json"
+SEEN_FILE = "/root/seen_announcements.json"
 LAST_ALERT_FILE = "last_alert.json"   # tracks when we last sent a real alert
 
 SLOW_DAY_HOURS  = 6    # send "slow day" message after this many hours of silence
