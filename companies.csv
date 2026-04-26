@@ -1,113 +1,140 @@
-company_name,bse_code,nse_symbol
-Reliance Industries,500325,RELIANCE
-HDFC Bank,500180,HDFCBANK
-Bharti Airtel,532454,BHARTIARTL
-State Bank of India,500112,SBIN
-ICICI Bank,532174,ICICIBANK
-Tata Consultancy Services,532540,TCS
-Bajaj Finance,500034,BAJFINANCE
-Larsen & Toubro,500510,LT
-Hindustan Unilever,500696,HINDUNILVR
-Infosys,500209,INFY
-Maruti Suzuki,532500,MARUTI
-Axis Bank,532215,AXISBANK
-Mahindra and Mahindra,500520,M&M
-Sun Pharmaceutical Industries,524715,SUNPHARMA
-Kotak Mahindra Bank,500247,KOTAKBANK
-ITC,500875,ITC
-Titan Company,500114,TITAN
-UltraTech Cement,532538,ULTRACEMCO
-HCL Technologies,532281,HCLTECH
-NTPC,532555,NTPC
-Adani Ports,532921,ADANIPORTS
-Oil & Natural Gas Corporation,500312,ONGC
-Bharat Electronics,500049,BEL
-Wipro,507685,WIPRO
-Asian Paints,500820,ASIANPAINT
-Adani Enterprises,512599,ADANIENT
-Coal India,533278,COALINDIA
-Tata Steel,500470,TATASTEEL
-Hindalco Industries,500440,HINDALCO
-HDFC Life Insurance,540777,HDFCLIFE
-SBI Life Insurance,540719,SBILIFE
-Bajaj Finserv,532978,BAJAJFINSV
-Tech Mahindra,532755,TECHM
-Nestle India,500790,NESTLEIND
-Tata Consumer Products,500800,TATACONSUM
-Power Grid Corporation,532898,POWERGRID
-IndusInd Bank,532187,INDUSINDBK
-Hero MotoCorp,500182,HEROMOTOCO
-Bajaj Auto,532977,BAJAJ-AUTO
-Cipla,500087,CIPLA
-Grasim Industries,500300,GRASIM
-Britannia Industries,500825,BRITANNIA
-Dr Reddys Laboratories,500124,DRREDDY
-Dmart,540376,DMART
-Trent,500251,TRENT
-Vedanta,500295,VEDL
-Tata Motors,500570,TATAMOTORS
-JSW Steel,500228,JSWSTEEL
-Adani Power,533096,ADANIPOWER
-Apollo Hospitals,508869,APOLLOHOSP
-DLF,532868,DLF
-Bharat Petroleum,500547,BPCL
-Indian Oil Corporation,530965,IOC
-Eicher Motors,505200,EICHERMOT
-Shriram Finance,511218,SHRIRAMFIN
-LTIMindtree,540005,LTIM
-Godrej Consumer Products,532424,GODREJCP
-Divis Laboratories,532488,DIVISLAB
-Havells India,517354,HAVELLS
-Adani Green Energy,541450,ADANIGREEN
-Torrent Pharmaceuticals,500420,TORNTPHARM
-Siemens,500550,SIEMENS
-Cholamandalam Investment,511243,CHOLAFIN
-Varun Beverages,540180,VBL
-SBI Cards,543066,SBICARD
-Muthoot Finance,533398,MUTHOOTFIN
-PI Industries,523642,PIIND
-Pidilite Industries,500331,PIDILITIND
-Interglobe Aviation (IndiGo),539448,INDIGO
-Zomato,543320,ZOMATO
-Nykaa,543401,NYKAA
-AU Small Finance Bank,540611,AUBANK
-Bank of Baroda,532134,BANKBARODA
-Canara Bank,532483,CANBK
-Ambuja Cements,500425,AMBUJACEM
-Bajaj Holdings,500490,BAJAJHLDNG
-Hindustan Zinc,500188,HINDZINC
-Marico,531642,MARICO
-Godrej Properties,533150,GODREJPROP
-Lodha,543441,LODHA
-Mankind Pharma,543904,MANKIND
-Zydus Lifesciences,532321,ZYDUSLIFE
-IDFC First Bank,539437,IDFCFIRSTB
-Bandhan Bank,541153,BANDHANBNK
-Federal Bank,500469,FEDERALBNK
-Persistent Systems,533179,PERSISTENT
-Oberoi Realty,533273,OBEROIRLTY
-Tata Power,500400,TATAPOWER
-Crompton Greaves Consumer,539876,CROMPTON
-Voltas,500575,VOLTAS
-Life Insurance Corporation,543526,LICI
-Adani Total Gas,542066,ATGL
-United Spirits,532432,MCDOWELL-N
-JSW Energy,533148,JSWENERGY
-Torrent Power,532779,TORNTPOWER
-Paytm,543396,PAYTM
-Adani Green Energy,541450,ADANIGREEN
-Coforge,532541,COFORGE
-Mphasis,526299,MPHASIS
-LTTS,540115,LTTS
-Sonata Software,532221,SONATSOFTW
-Happiest Minds,543227,HAPPSTMNDS
-Zensar Technologies,504067,ZENSARTECH
-SpiceJet,500285,SPICEJET
-Ola Electric,544225,OLAELEC
-Ather Energy,544288,ATHER
-TVS Motor Company,532343,TVSMOTOR
-Hyundai Motor India,544180,HYUNDAI
-Dixon Technologies,541002,DIXON
-Syrma SGS Technology,543573,SYRMA
-Tata Elxsi,500408,TATAELXSI
-Puravankara,532891,PURVA
+company_name,bse_code,nse_symbol,groups
+Reliance Industries,500325,RELIANCE,bse
+HDFC Bank,500180,HDFCBANK,both
+Bharti Airtel,532454,BHARTIARTL,bse
+State Bank of India,500112,SBIN,both
+ICICI Bank,532174,ICICIBANK,both
+Tata Consultancy Services,532540,TCS,bse
+Bajaj Finance,500034,BAJFINANCE,both
+Larsen & Toubro,500510,LT,bse
+Hindustan Unilever,500696,HINDUNILVR,bse
+Maruti Suzuki,532500,MARUTI,bse
+Axis Bank,532215,AXISBANK,both
+Mahindra and Mahindra,500520,M&M,bse
+Sun Pharmaceutical,524715,SUNPHARMA,bse
+Kotak Mahindra Bank,500247,KOTAKBANK,both
+ITC,500875,ITC,bse
+Titan Company,500114,TITAN,bse
+UltraTech Cement,532538,ULTRACEMCO,bse
+HCL Technologies,532281,HCLTECH,bse
+NTPC,532555,NTPC,bse
+Adani Ports,532921,ADANIPORTS,bse
+ONGC,500312,ONGC,bse
+Bharat Electronics,500049,BEL,bse
+Wipro,507685,WIPRO,bse
+Asian Paints,500820,ASIANPAINT,bse
+Adani Enterprises,512599,ADANIENT,bse
+Coal India,533278,COALINDIA,bse
+Tata Steel,500470,TATASTEEL,bse
+Hindalco Industries,500440,HINDALCO,bse
+HDFC Life Insurance,540777,HDFCLIFE,both
+SBI Life Insurance,540719,SBILIFE,both
+Bajaj Finserv,532978,BAJAJFINSV,both
+Tech Mahindra,532755,TECHM,bse
+Nestle India,500790,NESTLEIND,bse
+Tata Consumer Products,500800,TATACONSUM,bse
+Power Grid Corporation,532898,POWERGRID,bse
+IndusInd Bank,532187,INDUSINDBK,both
+Hero MotoCorp,500182,HEROMOTOCO,bse
+Bajaj Auto,532977,BAJAJ-AUTO,bse
+Cipla,500087,CIPLA,bse
+Grasim Industries,500300,GRASIM,bse
+Britannia Industries,500825,BRITANNIA,bse
+Dr Reddy's Laboratories,500124,DRREDDY,bse
+Avenue Supermarts,540376,DMART,bse
+Trent,500251,TRENT,bse
+Vedanta,500295,VEDL,bse
+Tata Motors,500570,TATAMOTORS,bse
+JSW Steel,500228,JSWSTEEL,bse
+Adani Power,533096,ADANIPOWER,bse
+Apollo Hospitals,508869,APOLLOHOSP,bse
+DLF,532868,DLF,bse
+BPCL,500547,BPCL,bse
+Indian Oil Corporation,530965,IOC,bse
+Eicher Motors,505200,EICHERMOT,bse
+Shriram Finance,511218,SHRIRAMFIN,both
+LTIMindtree,540005,LTIM,bse
+Godrej Consumer Products,532424,GODREJCP,bse
+Divi's Laboratories,532488,DIVISLAB,bse
+Havells India,517354,HAVELLS,bse
+Adani Green Energy,541450,ADANIGREEN,bse
+Torrent Pharmaceuticals,500420,TORNTPHARM,bse
+Siemens,500550,SIEMENS,bse
+Cholamandalam Investment and Finance,511243,CHOLAFIN,both
+Varun Beverages,540180,VBL,bse
+SBI Cards and Payment Services,543066,SBICARD,bse
+Muthoot Finance,533398,MUTHOOTFIN,both
+PI Industries,523642,PIIND,bse
+Pidilite Industries,500331,PIDILITIND,bse
+Interglobe Aviation (IndiGo),539448,INDIGO,bse
+Zomato,543320,ZOMATO,bse
+Nykaa,543384,NYKAA,bse
+AU Small Finance Bank,540611,AUBANK,both
+Bank of Baroda,532134,BANKBARODA,both
+Canara Bank,532483,CANBK,both
+Ambuja Cements,500425,AMBUJACEM,bse
+Bajaj Holdings,500490,BAJAJHLDNG,bse
+Hindustan Zinc,500188,HINDZINC,bse
+Marico,531642,MARICO,bse
+Godrej Properties,533150,GODREJPROP,bse
+Lodha,543287,LODHA,bse
+Mankind Pharma,543904,MANKIND,bse
+Zydus Lifesciences,532321,ZYDUSLIFE,bse
+IDFC First Bank,539437,IDFCFIRSTB,both
+Bandhan Bank,541153,BANDHANBNK,both
+Federal Bank,500469,FEDERALBNK,both
+Persistent Systems,533179,PERSISTENT,bse
+Oberoi Realty,533273,OBEROIRLTY,bse
+Tata Power,500400,TATAPOWER,bse
+Crompton Greaves Consumer,539876,CROMPTON,bse
+Voltas,500575,VOLTAS,bse
+Life Insurance Corporation of India,543526,LICI,both
+Adani Total Gas,542066,ATGL,bse
+United Spirits,532432,MCDOWELL-N,bse
+JSW Energy,533148,JSWENERGY,bse
+Torrent Power,532779,TORNTPOWER,bse
+One97 Communications (Paytm),543396,PAYTM,both
+Coforge,532541,COFORGE,bse
+Mphasis,526299,MPHASIS,bse
+L&T Technology Services,540115,LTTS,bse
+Sonata Software,532221,SONATSOFTW,bse
+Happiest Minds Technologies,543227,HAPPSTMNDS,bse
+Zensar Technologies,504067,ZENSARTECH,bse
+SpiceJet,500285,SPICEJET,bse
+Ola Electric,544220,OLAELEC,bse
+Ather Energy,544120,ATHER,bse
+TVS Motor Company,532343,TVSMOTOR,bse
+Hyundai Motor India,543882,HYUNDAI,bse
+Dixon Technologies,541301,DIXON,bse
+Syrma SGS Technology,543573,SYRMA,bse
+Tata Elxsi,500408,TATAELXSI,bse
+Puravankara,532891,PURVA,bse
+Yes Bank Ltd,532648,YESBANK,regulator
+Punjab National Bank,532461,PNB,regulator
+Union Bank of India,532477,UNIONBANK,regulator
+Indian Bank,532814,INDIANB,regulator
+Bank of India,532149,BANKINDIA,regulator
+Central Bank of India,532885,CENTRALBK,regulator
+Indian Overseas Bank,532388,IOB,regulator
+UCO Bank,532505,UCOBANK,regulator
+ICICI Prudential Life Insurance,540133,ICICIPRULI,regulator
+ICICI Lombard General Insurance,540716,ICICIGI,regulator
+General Insurance Corporation of India,540556,GICRE,regulator
+Star Health and Allied Insurance,543412,STARHEALTH,regulator
+The New India Assurance Co Ltd,540769,NIACL,regulator
+Jio Financial Services Ltd,543940,JIOFIN,regulator
+Mahindra and Mahindra Financial Services,532720,M&MFIN,regulator
+Bajaj Housing Finance Ltd,544252,BAJAJHFL,regulator
+Aditya Birla Capital Ltd,540691,ABCAPITAL,regulator
+Piramal Enterprises Ltd,500302,PEL,regulator
+L&T Finance Ltd,533519,LTF,regulator
+Sundaram Finance Ltd,503310,SUNDARMFIN,regulator
+Power Finance Corporation Ltd,532810,PFC,regulator
+REC Ltd,532955,RECLTD,regulator
+Indian Railway Finance Corporation,543257,IRFC,regulator
+HUDCO,540530,HUDCO,regulator
+HDFC Asset Management Co Ltd,541729,HDFCAMC,regulator
+Nippon Life India Asset Management,540767,NAM-INDIA,regulator
+BSE Ltd,540526,BSE,regulator
+Multi Commodity Exchange of India,534428,MCX,regulator
+PB Fintech Ltd,543390,PBFINTECH,regulator
