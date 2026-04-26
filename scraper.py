@@ -1,9 +1,12 @@
 """
 BSE Corporate Announcement Scraper
 - Fetches new announcements from BSE every run
-- Matches against your watchlist in companies.csv
-- Uses Gemini AI to summarise the attached PDF/XML
-- Sends a one-line alert via Telegram
+- Matches against watchlist in companies.csv
+- Routes alerts based on 'groups' column:
+    bse       → BSE Telegram group only
+    regulator → SEBI/RBI Telegram group only
+    both      → both groups
+- Uses Gemini AI to summarise the attached PDF
 - Sends a "slow day" message if no alerts for 6 hours
 """
 
@@ -19,15 +22,15 @@ from google import genai
 from google.genai import types
 
 # ── Config ────────────────────────────────────────────────────────────────────
-TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-TELEGRAM_CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
-GEMINI_API_KEY     = os.environ["GEMINI_API_KEY"]
+TELEGRAM_BOT_TOKEN      = os.environ["TELEGRAM_BOT_TOKEN"]
+TELEGRAM_CHAT_ID        = os.environ["TELEGRAM_CHAT_ID"]
+TELEGRAM_CHAT_ID_REGULATOR = os.environ.get("TELEGRAM_CHAT_ID_REGULATOR", "")
 
 COMPANIES_FILE  = "companies.csv"
-SEEN_FILE       = "seen_announcements.json"
-LAST_ALERT_FILE = "last_alert.json"   # tracks when we last sent a real alert
+SEEN_FILE       = "/root/seen_announcements.json"
+LAST_ALERT_FILE = "last_alert.json"
 
-SLOW_DAY_HOURS  = 6    # send "slow day" message after this many hours of silence
+SLOW_DAY_HOURS = 6
 
 BSE_API_URL  = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
 BSE_DOC_BASE = "https://www.bseindia.com/xml-data/corpfiling/AttachLive/"
@@ -41,23 +44,32 @@ HEADERS = {
     "Referer": "https://www.bseindia.com/",
 }
 
-# Initialise Gemini client
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 GEMINI_MODEL = "gemini-2.5-flash"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def load_companies() -> dict:
+    """
+    Returns dict: key → (display_name, groups)
+    Keys are lowercase name, bse_code, and partial name fragments.
+    groups is a set: {'bse'}, {'regulator'}, or {'bse', 'regulator'}
+    """
     companies = {}
     with open(COMPANIES_FILE, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            name = row.get("company_name", "").strip()
-            code = row.get("bse_code", "").strip()
+            name   = row.get("company_name", "").strip()
+            code   = row.get("bse_code", "").strip()
+            groups_str = row.get("groups", "bse").strip()
+            groups = set(groups_str.split(",")) if groups_str else {"bse"}
+            # Normalise: 'both' means bse + regulator
+            if "both" in groups:
+                groups = {"bse", "regulator"}
             if name:
-                companies[name.lower()] = name
+                companies[name.lower()] = (name, groups)
             if code:
-                companies[code] = name or code
+                companies[code] = (name or code, groups)
     return companies
 
 
@@ -74,7 +86,6 @@ def save_seen(seen: set):
 
 
 def load_last_alert_time() -> datetime | None:
-    """Return the datetime of the last real alert sent, or None."""
     if Path(LAST_ALERT_FILE).exists():
         with open(LAST_ALERT_FILE) as f:
             data = json.load(f)
@@ -85,7 +96,6 @@ def load_last_alert_time() -> datetime | None:
 
 
 def save_last_alert_time():
-    """Save current time as the last alert time."""
     with open(LAST_ALERT_FILE, "w") as f:
         json.dump({"last_alert": datetime.now().isoformat()}, f)
 
@@ -135,17 +145,16 @@ def summarise_with_gemini(content: bytes, mime_type: str, company: str, headline
         f"BSE Headline: {headline}\n\n"
         "You are a journalist with the biggest pink-sheet newspaper in India. "
         "First, decide if this announcement has genuine news value. "
-        "DISCARD routine announcements with no news value such as: closure of trading window, "
-        "investor meets, transfer and dematerialisation of physical shares, change of address, "
-        "ISIN updates, compliance filings, or any other administrative/regulatory routine. "
-        "REPORT announcements that have genuine news value such as: press releases, acquisitions, "
-        "mergers, board appointments or resignations, financial results, investor presentations, "
-        "new orders, joint ventures, fundraising, or any material business development. "
-        "If you decide to DISCARD, respond with exactly the word: DISCARD\n"
-        "If you decide to REPORT, respond with one concise sentence summarising the news value. "
+        "DISCARD routine announcements: closure of trading window, investor meets, "
+        "transfer and dematerialisation of physical shares, change of address, "
+        "ISIN updates, compliance filings, or administrative/regulatory routine. "
+        "REPORT announcements with genuine news value: press releases, acquisitions, "
+        "mergers, board appointments or resignations, financial results, investor "
+        "presentations, new orders, joint ventures, fundraising, or material business development. "
+        "If DISCARD, respond with exactly: DISCARD\n"
+        "If REPORT, respond with one concise sentence summarising the news value. "
         "Do not focus on what the company wants to say, but on the news value."
     )
-
     if "pdf" in mime_type:
         response = client.models.generate_content(
             model=GEMINI_MODEL,
@@ -163,15 +172,14 @@ def summarise_with_gemini(content: bytes, mime_type: str, company: str, headline
             model=GEMINI_MODEL,
             contents=f"{prompt}\n\nAnnouncement content:\n{text_content[:8000]}",
         )
-
     return response.text.strip()
 
 
-def send_telegram(message: str):
+def send_telegram(chat_id: str, message: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
         resp = requests.post(url, json={
-            "chat_id":    TELEGRAM_CHAT_ID,
+            "chat_id":    chat_id,
             "text":       message,
             "parse_mode": "HTML",
         }, timeout=15)
@@ -179,12 +187,11 @@ def send_telegram(message: str):
     except Exception:
         import re
         plain = re.sub(r"<[^>]+>", "", message)
-        resp = requests.post(url, json={
-            "chat_id": TELEGRAM_CHAT_ID,
+        requests.post(url, json={
+            "chat_id": chat_id,
             "text":    plain,
         }, timeout=15)
-        resp.raise_for_status()
-    print(f"[TELEGRAM] Sent: {message[:80]}")
+    print(f"  [TELEGRAM → {chat_id}] {message[:60]}…")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -211,23 +218,27 @@ def main():
         bse_headline = str(ann.get("HEADLINE") or "").strip()
         dt_tm        = str(ann.get("DT_TM") or "").strip()
 
+        # Match company and get its groups
         matched_display = None
+        matched_groups  = set()
+
         if company_name.lower() in companies:
-            matched_display = companies[company_name.lower()]
+            matched_display, matched_groups = companies[company_name.lower()]
         elif scrip_code in companies:
-            matched_display = companies[scrip_code]
+            matched_display, matched_groups = companies[scrip_code]
         else:
-            for key, display in companies.items():
+            for key, (display, groups) in companies.items():
                 if len(key) > 4 and key in company_name.lower():
                     matched_display = display
+                    matched_groups  = groups
                     break
 
         if not matched_display:
             continue
 
-        print(f"  HIT: {matched_display} — {headline}")
+        print(f"  HIT: {matched_display} [{','.join(matched_groups)}] — {headline}")
 
-        # Use the richer HEADLINE field as fallback if Gemini fails
+        # Summarise with Gemini
         summary    = bse_headline if bse_headline else headline
         attach_url = get_attachment_url(ann)
 
@@ -240,9 +251,8 @@ def main():
             except Exception as e:
                 print(f"    [WARN] Attachment processing failed: {e}")
 
-        # Skip routine announcements flagged by Gemini
         if summary.strip().upper() == "DISCARD":
-            print(f"    Skipping — Gemini flagged as routine announcement")
+            print(f"    Skipping — Gemini flagged as routine")
             continue
 
         time_str = dt_tm[:16] if len(dt_tm) >= 16 else dt_tm
@@ -252,24 +262,37 @@ def main():
             f"🕐 {time_str}\n"
             + (f"📎 Here is the BSE link - {attach_url}" if attach_url else "")
         )
-        try:
-            send_telegram(message)
+
+        # Route to correct Telegram group(s)
+        sent = False
+        if "bse" in matched_groups:
+            try:
+                send_telegram(TELEGRAM_CHAT_ID, message)
+                sent = True
+            except Exception as e:
+                print(f"    [ERROR] BSE Telegram failed: {e}")
+
+        if "regulator" in matched_groups and TELEGRAM_CHAT_ID_REGULATOR:
+            try:
+                send_telegram(TELEGRAM_CHAT_ID_REGULATOR, message)
+                sent = True
+            except Exception as e:
+                print(f"    [ERROR] Regulator Telegram failed: {e}")
+
+        if sent:
             save_last_alert_time()
             real_alerts += 1
             time.sleep(0.5)
-        except Exception as e:
-            print(f"    [ERROR] Telegram send failed: {e}")
 
     # ── Slow day check ────────────────────────────────────────────────────────
     if real_alerts == 0:
         last_alert = load_last_alert_time()
         silence_threshold = datetime.now() - timedelta(hours=SLOW_DAY_HOURS)
-
         if last_alert is None or last_alert < silence_threshold:
             try:
-                send_telegram("🔕 Scraper is working, it's just a slow day.")
+                send_telegram(TELEGRAM_CHAT_ID, "🔕 Scraper is working, it's just a slow day.")
                 save_last_alert_time()
-                print(f"  Sent slow day message (no alerts for {SLOW_DAY_HOURS}+ hours)")
+                print(f"  Sent slow day message")
             except Exception as e:
                 print(f"  [ERROR] Slow day message failed: {e}")
 
