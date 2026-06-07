@@ -1,9 +1,10 @@
 """
 Water News Monitor
-- Searches Google News RSS with multiple water-related queries every hour
-- Deduplicates across all queries
-- Sends each article to Gemini for vetting and summarisation
-- Sends approved stories to a dedicated Telegram group
+- Scans Google News every 4 hours across two keyword sets
+- "Watty says"   — broad water news queries
+- "Daubner says" — specific GIZ/multilateral water policy queries (EN/DE/FR)
+- Gemini vets every article before sending
+- All alerts go to one Telegram group
 """
 
 import os
@@ -19,49 +20,12 @@ from google import genai
 
 # ── Config ────────────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-TELEGRAM_CHAT_ID   = "-1003759574195"   # water news group
-
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
-GEMINI_MODEL   = "gemini-2.5-flash"
+TELEGRAM_CHAT_ID   = "-1003759574195"
+GEMINI_API_KEY     = os.environ["GEMINI_API_KEY"]
+GEMINI_MODEL       = "gemini-2.5-flash"
 
 SEEN_FILE        = "/root/seen_water.json"
-LOOKBACK_MINUTES = 65   # slightly wider than 60-min cron to avoid gaps
-
-# ── Search queries — cast wide across all water angles ────────────────────────
-QUERIES = [
-    # Policy & politics
-    "water policy government",
-    "water law regulation",
-    "water rights dispute",
-    "river water sharing treaty",
-    "transboundary water agreement",
-    # Crisis & environment
-    "water scarcity crisis",
-    "drought water shortage",
-    "groundwater depletion",
-    "water pollution contamination",
-    "water quality disease",
-    "flood water disaster",
-    "glacier melt freshwater",
-    # Access & equity
-    "drinking water access rural",
-    "water sanitation poverty",
-    "water inequality community",
-    "water privatisation",
-    # Innovation & technology
-    "water technology innovation",
-    "water desalination",
-    "water recycling treatment",
-    "rainwater harvesting",
-    # Positive & solutions
-    "water conservation success",
-    "water restoration river lake",
-    "clean water project",
-    # India-specific
-    "India water crisis",
-    "Ganga Yamuna river pollution",
-    "India water policy NITI Aayog",
-]
+LOOKBACK_MINUTES = 245   # slightly wider than 4-hour cron window
 
 HEADERS = {
     "User-Agent": (
@@ -72,6 +36,90 @@ HEADERS = {
 }
 
 client = genai.Client(api_key=GEMINI_API_KEY)
+
+# ── Watty queries — broad water news ─────────────────────────────────────────
+WATTY_QUERIES = [
+    # Policy & politics
+    ("water policy government",         "en"),
+    ("water law regulation",            "en"),
+    ("water rights dispute",            "en"),
+    ("river water sharing treaty",      "en"),
+    ("transboundary water agreement",   "en"),
+    # Crisis & environment
+    ("water scarcity crisis",           "en"),
+    ("drought water shortage",          "en"),
+    ("groundwater depletion",           "en"),
+    ("water pollution contamination",   "en"),
+    ("water quality disease",           "en"),
+    ("flood water disaster",            "en"),
+    ("glacier melt freshwater",         "en"),
+    # Access & equity
+    ("drinking water access rural",     "en"),
+    ("water sanitation poverty",        "en"),
+    ("water inequality community",      "en"),
+    ("water privatisation",             "en"),
+    # Innovation & technology
+    ("water technology innovation",     "en"),
+    ("water desalination",              "en"),
+    ("water recycling treatment",       "en"),
+    ("rainwater harvesting",            "en"),
+    # Positive & solutions
+    ("water conservation success",      "en"),
+    ("water restoration river lake",    "en"),
+    ("clean water project",             "en"),
+    # India-specific
+    ("India water crisis",              "en"),
+    ("Ganga Yamuna river pollution",    "en"),
+    ("India water policy NITI Aayog",   "en"),
+]
+
+# ── Daubner queries — GIZ/multilateral water policy (EN/DE/FR) ───────────────
+DAUBNER_QUERIES = [
+    # English
+    ('"Global Water Security for Resilient Development"',                                   "en"),
+    ('"Water Security in Africa" OR "WASA program"',                                        "en"),
+    ('"Interactive Dialogue 5" AND "Germany" AND "Mexico"',                                 "en"),
+    ('"Water in Multilateral Processes" "UN-Water Conference"',                             "en"),
+    ('"Team Europe Initiative" AND "Water Security"',                                       "en"),
+    ('"GIZ" AND "Global Water Security"',                                                   "en"),
+    ('"AMCOW" AND "African Union" AND "Water"',                                             "en"),
+    ('"Integrated Water Resources Management" OR IWRM',                                     "en"),
+    ('"African Union Commission" water',                                                    "en"),
+    # German
+    ('"Globale Wassersicherheit"',                                                          "de"),
+    ('"Interaktiver Dialog 5" AND "Deutschland" AND "Mexiko"',                              "de"),
+    ('"UN-Wasser-Konferenz"',                                                               "de"),
+    ('"Wasser in multilateralen Prozessen"',                                                "de"),
+    ('"Team Europe Initiative" AND "Wasser"',                                               "de"),
+    ('"GIZ" AND "Wassersicherheit"',                                                        "de"),
+    ('"Afrikanische Union" AND "Wasser"',                                                   "de"),
+    ('"Grenzüberschreitende Wasserbewirtschaftung"',                                        "de"),
+    ('"Grenzüberschreitende Governance" OR "Wasser-Governance"',                            "de"),
+    ('"Flusseinzugsgebietsorganisation"',                                                   "de"),
+    ('"Integriertes Wasserressourcen-Management" OR IWRM',                                  "de"),
+    ('"Wasserdiplomatie" OR "Hydropolitik"',                                                "de"),
+    ('"Wasserresilienz" OR "Wasserkonflikt"',                                               "de"),
+    # French
+    ('"Sécurité hydrique mondiale" OR "Sécurité de l\'eau pour un développement résilient"',"fr"),
+    ('"Dialogue interactif 5" AND "Allemagne" AND "Mexique"',                               "fr"),
+    ('"L\'eau dans les processus multilatéraux"',                                           "fr"),
+    ('"Initiative Team Europe" AND "Eau"',                                                  "fr"),
+    ('"GIZ" AND "Sécurité de l\'eau"',                                                      "fr"),
+    ('"Union Africaine" AND "Eau"',                                                         "fr"),
+    ('"COMAE"',                                                                             "fr"),
+    ('"Gouvernance transfrontalière de l\'eau" OR "Gestion transfrontalière des eaux"',     "fr"),
+    ('"Organisme de bassin" OR "Organisme de bassin fluvial"',                              "fr"),
+    ('"Diplomatie de l\'eau" OR "Hydro-politique"',                                         "fr"),
+    ('"Gestion intégrée des ressources en eau" OR GIRE',                                    "fr"),
+    ('"Résilience hydrique" OR "Conflit lié à l\'eau"',                                     "fr"),
+]
+
+# Map language code to Google News locale params
+LOCALE = {
+    "en": "hl=en-US&gl=US&ceid=US:en",
+    "de": "hl=de&gl=DE&ceid=DE:de",
+    "fr": "hl=fr&gl=FR&ceid=FR:fr",
+}
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -92,14 +140,15 @@ def make_id(text: str) -> str:
     return hashlib.md5(text.encode()).hexdigest()
 
 
-def fetch_google_news(query: str, lookback_minutes: int) -> list[dict]:
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
+def fetch_google_news(query: str, lang: str) -> list[dict]:
+    locale = LOCALE.get(lang, LOCALE["en"])
     url    = (
-        "https://news.google.com/rss/search"
-        f"?q={requests.utils.quote(query)}"
-        "&hl=en-IN&gl=IN&ceid=IN:en"
+        f"https://news.google.com/rss/search"
+        f"?q={requests.utils.quote(query)}&{locale}"
     )
+    cutoff   = datetime.now(timezone.utc) - timedelta(minutes=LOOKBACK_MINUTES)
     articles = []
+
     try:
         resp = requests.get(url, headers=HEADERS, timeout=20)
         resp.raise_for_status()
@@ -127,34 +176,57 @@ def fetch_google_news(query: str, lookback_minutes: int) -> list[dict]:
             })
 
     except Exception as e:
-        print(f"  [WARN] Google News failed for '{query}': {e}")
+        print(f"  [WARN] Google News failed for '{query[:50]}': {e}")
 
     return articles
 
 
-def vet_with_gemini(title: str, link: str) -> str | None:
+def collect_articles(query_list: list[tuple]) -> dict:
+    """Fetch all queries, return deduplicated dict of id → article."""
+    all_articles = {}
+    for query, lang in query_list:
+        for article in fetch_google_news(query, lang):
+            if article["id"] not in all_articles:
+                all_articles[article["id"]] = article
+        time.sleep(0.5)
+    return all_articles
+
+
+def vet_with_gemini(title: str, link: str, brand: str) -> str | None:
     """
-    Returns a one-line summary if the article is genuinely about water
-    and has news value. Returns None if it should be discarded.
+    Returns a one-line summary if article is genuinely about water
+    and has news value. Returns None if discarded.
     """
+    if brand == "DAUBNER":
+        context = (
+            "This article was found via searches about GIZ water programs, "
+            "multilateral water policy, African Union water governance, "
+            "water diplomacy, or transboundary water management. "
+            "Accept articles substantially covering these specific topics even if "
+            "they are technical policy documents or multilateral meeting reports."
+        )
+    else:
+        context = (
+            "This article was found via broad water news searches. "
+            "Accept articles substantially about water policy, access, drought, "
+            "floods, pollution, technology, treaties, or water-related human stories."
+        )
+
     prompt = (
         f"Article title: {title}\n"
         f"Link: {link}\n\n"
-        "You are a journalist at a global publication covering water issues. "
-        "Decide if this article is genuinely and substantially about water — "
-        "this includes water policy, water access, drought, floods, water pollution, "
-        "water technology, river and lake health, water treaties, sanitation, "
-        "groundwater, glaciers, water rights, or water-related diseases.\n\n"
+        f"Context: {context}\n\n"
         "DISCARD if: water is only mentioned in passing, the article is primarily "
-        "about something else (finance, cricket, entertainment), it is a press release "
-        "or advertisement, or it has no genuine news value.\n\n"
-        "REPORT if: the article is substantially about water and has genuine news value "
-        "— a new policy, a crisis, a conflict, a scientific finding, a human story, "
-        "a triumph, an innovation, or a significant event.\n\n"
+        "about something else, it is a press release or advertisement, or it has "
+        "no genuine news value.\n\n"
+        "REPORT if: the article is substantially relevant to the context above "
+        "and has genuine news value.\n\n"
         "If DISCARD, respond with exactly: DISCARD\n"
         "If REPORT, respond with one concise sentence capturing the news value. "
-        "Include the location or country if relevant."
+        "Include the location or country if relevant. "
+        "Respond in English regardless of the article's language."
     )
+
     try:
         response = client.models.generate_content(
             model=GEMINI_MODEL,
@@ -186,43 +258,33 @@ def send_telegram(message: str):
             "chat_id": TELEGRAM_CHAT_ID,
             "text":    plain,
         }, timeout=15)
-    print(f"  [TELEGRAM] Sent: {message[:80]}")
+    print(f"  [TELEGRAM] {message[:80]}")
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+def process_query_set(brand: str, query_list: list[tuple], seen: set) -> int:
+    """Fetch, vet, and send articles for one brand. Returns alert count."""
+    prefix  = "💧 <b>Watty says</b>" if brand == "WATTY" else "🌍 <b>Daubner says</b>"
+    emoji   = "💧" if brand == "WATTY" else "🌍"
+    alerts  = 0
 
-def main():
-    print(f"[{datetime.now().isoformat()}] Starting water news monitor run…")
+    articles = collect_articles(query_list)
+    print(f"  [{brand}] {len(articles)} unique articles fetched")
 
-    seen   = load_seen()
-    alerts = 0
-
-    # Collect all articles across all queries, deduplicating by ID
-    all_articles = {}
-    for query in QUERIES:
-        articles = fetch_google_news(query, LOOKBACK_MINUTES)
-        for a in articles:
-            if a["id"] not in all_articles:
-                all_articles[a["id"]] = a
-        time.sleep(0.5)   # gentle on Google News
-
-    print(f"  {len(all_articles)} unique articles fetched across {len(QUERIES)} queries")
-
-    for article_id, article in all_articles.items():
-        seen_key = f"water-{article_id}"
+    for article_id, article in articles.items():
+        seen_key = f"{brand}-{article_id}"
         if seen_key in seen:
             continue
         seen.add(seen_key)
 
-        print(f"  Vetting: {article['title'][:70]}")
-        summary = vet_with_gemini(article["title"], article["link"])
+        print(f"  [{brand}] Vetting: {article['title'][:60]}")
+        summary = vet_with_gemini(article["title"], article["link"], brand)
 
         if summary is None:
-            print(f"    Discarded by Gemini")
+            print(f"    Discarded")
             continue
 
         message = (
-            f"💧 <b>Water</b>\n"
+            f"{prefix}\n"
             f"📋 {summary}\n"
             f"🔗 {article['link']}"
         )
@@ -234,8 +296,20 @@ def main():
         except Exception as e:
             print(f"  [ERROR] Telegram failed: {e}")
 
+    return alerts
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def main():
+    print(f"[{datetime.now().isoformat()}] Starting water monitor run…")
+
+    seen         = load_seen()
+    watty_alerts   = process_query_set("WATTY",   WATTY_QUERIES,   seen)
+    daubner_alerts = process_query_set("DAUBNER", DAUBNER_QUERIES, seen)
+
     save_seen(seen)
-    print(f"  Done. {alerts} article(s) sent.")
+    print(f"  Done. Watty: {watty_alerts} alert(s). Daubner: {daubner_alerts} alert(s).")
 
 
 if __name__ == "__main__":
