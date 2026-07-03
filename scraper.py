@@ -218,16 +218,17 @@ def summarise_with_gemini(content: bytes, mime_type: str, company: str, headline
         "mergers, board appointments or resignations, financial results, investor "
         "presentations, new orders, joint ventures, fundraising, or material business developments.\n\n"
         "If DISCARD, respond with exactly: DISCARD\n\n"
-        "If REPORT, write a 2-3 line summary as if you were pitching this story to your editor. "
-        "Lead with the news value, not what the company wants to say. "
+        "If REPORT, write a 2 line summary as if you were pitching this story to your editor. "
+        "Lead with the news value, not what the company wants to say. Be grounded in facts, don't dramatize it."
         "Use Google Search to find relevant context from Mint's past reportage on this "
         "company or topic, and weave in one line of that context if it strengthens the pitch.\n\n"
         "SPECIAL CASE: If this announcement is a clarification sought by the exchange from "
-        "the company regarding a news report, or the company's reply to such a clarification, "
+        "the company regarding a news report,"
         "use Google Search to find the original news article being referred to and add its "
         "direct URL at the end on a new line, in exactly this format:\n"
         "📰 Article: <url>\n"
-        "Only include a URL you actually found via search — never invent one."
+        "Only include a URL you actually found via search — never invent one"
+        "If its the company's reply to such a clarification, summarize the response."
     )
 
     config = types.GenerateContentConfig(
