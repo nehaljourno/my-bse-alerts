@@ -6,7 +6,8 @@ BSE Corporate Announcement Scraper
     bse       → BSE Telegram group only
     regulator → SEBI/RBI Telegram group only
     both      → both groups
-- Uses Gemini AI (with Google Search grounding) to summarise the attached PDF
+- Uses Gemini AI to summarise the attached PDF (1-2 lines, filing facts only)
+- Google Search grounding used ONLY for clarification announcements (to find article link)
 - Sends a "slow day" message if no alerts for 6 hours
 """
 
@@ -69,7 +70,6 @@ def load_companies():
     Returns two dicts:
       by_code: bse_code (str)        → (display_name, groups)
       by_name: normalized full name  → (display_name, groups)
-    groups is a set: {'bse'}, {'regulator'}, or {'bse', 'regulator'}
     """
     by_code = {}
     by_name = {}
@@ -78,7 +78,6 @@ def load_companies():
         for row in reader:
             name = row.get("company_name", "").strip()
             code = row.get("bse_code", "").strip()
-            # Handle codes accidentally saved as floats, e.g. "500325.0"
             if code.endswith(".0"):
                 code = code[:-2]
             groups_str = row.get("groups", "bse").strip()
@@ -97,11 +96,9 @@ def load_companies():
 def match_company(scrip_code: str, company_name: str, by_code: dict, by_name: dict):
     """
     Match priority:
-      1. Exact scrip code (authoritative — BSE always provides SCRIP_CD)
+      1. Exact scrip code (authoritative)
       2. Exact normalized name
-      3. Strict prefix match: announcement name STARTS WITH the watchlist name
-         (never a substring match anywhere in the name)
-    Returns (display_name, groups) or (None, set()).
+      3. Strict prefix match on normalized names
     """
     if scrip_code in by_code:
         return by_code[scrip_code]
@@ -204,36 +201,90 @@ def extract_grounding_urls(response) -> list:
     return urls
 
 
-def summarise_with_gemini(content: bytes, mime_type: str, company: str, headline: str):
-    """Returns (summary_text, grounding_urls)."""
-    prompt = (
+def get_final_text(response) -> str:
+    """
+    With search grounding, Gemini can return multiple text parts
+    (draft + grounded rewrite). response.text concatenates them all,
+    which caused duplicated summaries. Take only the LAST text part.
+    """
+    try:
+        parts = response.candidates[0].content.parts or []
+        texts = [p.text.strip() for p in parts if getattr(p, "text", None)]
+        if texts:
+            return texts[-1]
+    except Exception:
+        pass
+    return (response.text or "").strip()
+
+
+def clean_summary(text: str, max_sentences: int = 2, max_chars: int = 320) -> str:
+    """
+    Safety net: dedupe repeated paragraphs/sentences, trim to max_sentences,
+    hard-cap length. Preserves a trailing '📰 Article: <url>' line if present.
+    """
+    article_line = ""
+    m = re.search(r"📰 Article:.*", text)
+    if m:
+        article_line = m.group(0).strip()
+        text = text[:m.start()]
+
+    text = " ".join(text.split())
+
+    # Split into sentences, drop exact duplicates while preserving order
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    seen_s, unique = set(), []
+    for s in sentences:
+        key = s.strip().lower()
+        if key and key not in seen_s:
+            seen_s.add(key)
+            unique.append(s.strip())
+
+    trimmed = " ".join(unique[:max_sentences])
+    if len(trimmed) > max_chars:
+        trimmed = trimmed[:max_chars].rsplit(" ", 1)[0] + "…"
+
+    if article_line:
+        trimmed += f"\n{article_line}"
+    return trimmed
+
+
+def summarise_with_gemini(content: bytes, mime_type: str, company: str,
+                          headline: str, is_clarification: bool):
+    """Returns (summary_text, grounding_urls). Search only for clarifications."""
+
+    base_prompt = (
         f"Company: {company}\n"
         f"BSE Headline: {headline}\n\n"
-        "You are a journalist at Mint (livemint.com), India's biggest business newspaper. "
-        "First, decide if this BSE announcement has genuine news value. "
+        "You are a wire reporter filing a one-line alert for a busy editor at Mint. "
+        "First, decide if this BSE filing has genuine news value. "
         "DISCARD routine announcements: closure of trading window, investor meets, "
         "transfer and dematerialisation of physical shares, change of address, "
-        "ISIN updates, compliance filings, or administrative/regulatory routine. "
-        "REPORT announcements with genuine news value: press releases, acquisitions, "
-        "mergers, board appointments or resignations, financial results, investor "
-        "presentations, new orders, joint ventures, fundraising, or material business developments.\n\n"
+        "ISIN updates, compliance filings, or administrative/regulatory routine.\n\n"
         "If DISCARD, respond with exactly: DISCARD\n\n"
-        "If REPORT, write a 2 line summary as if you were pitching this story to your editor. "
-        "Lead with the news value, not what the company wants to say. Be grounded in facts, don't dramatize it."
-        "Use Google Search to find relevant context from Mint's past reportage on this "
-        "company or topic, and weave in one line of that context if it strengthens the pitch.\n\n"
-        "SPECIAL CASE: If this announcement is a clarification sought by the exchange from "
-        "the company regarding a news report,"
-        "use Google Search to find the original news article being referred to and add its "
-        "direct URL at the end on a new line, in exactly this format:\n"
-        "📰 Article: <url>\n"
-        "Only include a URL you actually found via search — never invent one"
-        "If its the company's reply to such a clarification, summarize the response."
+        "If it has news value, report ONLY what the filing itself says, in ONE sentence "
+        "(a second sentence only if a key fact genuinely cannot fit). Maximum 40 words total. "
+        "STRICT RULES:\n"
+        "- Only facts and figures stated in this document. No outside context, no background, "
+        "no company history, no market reaction, no analysis, no concerns, no implications.\n"
+        "- Lead with the hardest fact: what happened, deal size, names, dates.\n"
+        "- No preamble, no repetition, no 'the company announced that'."
     )
 
-    config = types.GenerateContentConfig(
-        tools=[types.Tool(google_search=types.GoogleSearch())],
-    )
+    if is_clarification:
+        prompt = base_prompt + (
+            "\n\nSPECIAL CASE: This filing relates to an exchange clarification about a news "
+            "report. State in one line what the report claimed and what the company said. "
+            "Use Google Search to find the original news article and add its direct URL on a "
+            "new line, in exactly this format:\n"
+            "📰 Article: <url>\n"
+            "Only include a URL you actually found via search — never invent one."
+        )
+        config = types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+        )
+    else:
+        prompt = base_prompt
+        config = None  # No search — filing facts only, keeps output tight
 
     if "pdf" in mime_type:
         response = client.models.generate_content(
@@ -255,7 +306,7 @@ def summarise_with_gemini(content: bytes, mime_type: str, company: str, headline
             config=config,
         )
 
-    return response.text.strip(), extract_grounding_urls(response)
+    return get_final_text(response), extract_grounding_urls(response)
 
 
 def send_telegram(chat_id: str, message: str):
@@ -311,7 +362,6 @@ def main():
 
         is_clarification = "clarification" in f"{headline} {bse_headline}".lower()
 
-        # Summarise with Gemini
         summary     = bse_headline if bse_headline else headline
         source_urls = []
         attach_url  = get_attachment_url(ann)
@@ -321,7 +371,7 @@ def main():
                 print(f"    Downloading: {attach_url}")
                 content, mime = download_attachment(attach_url)
                 summary, source_urls = summarise_with_gemini(
-                    content, mime, matched_display, headline
+                    content, mime, matched_display, headline, is_clarification
                 )
                 print(f"    AI Summary: {summary}")
             except Exception as e:
@@ -331,8 +381,9 @@ def main():
             print(f"    Skipping — Gemini flagged as routine")
             continue
 
-        # Fallback: clarification announcement but Gemini didn't include a link —
-        # use the first source URL from its search grounding metadata
+        summary = clean_summary(summary)
+
+        # Fallback: clarification but no link in summary — use grounding metadata
         if is_clarification and "http" not in summary and source_urls:
             summary += f"\n📰 Article: {source_urls[0]}"
 
@@ -344,7 +395,6 @@ def main():
             + (f"📎 Here is the BSE link - {attach_url}" if attach_url else "")
         )
 
-        # Route to correct Telegram group(s)
         sent = False
         if "bse" in matched_groups:
             try:
