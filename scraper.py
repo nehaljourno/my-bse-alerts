@@ -1,6 +1,6 @@
 """
 BSE Corporate Announcement Scraper
-- Fetches new announcements from BSE every run
+- Fetches new announcements from BSE every run (up to MAX_PAGES pages)
 - Matches against watchlist in companies.csv
 - Routes alerts based on 'groups' column:
     bse       → BSE Telegram group only
@@ -9,6 +9,11 @@ BSE Corporate Announcement Scraper
 - Uses Gemini AI to summarise the attached PDF (1-2 lines, filing facts only)
 - Google Search grounding used ONLY for clarification announcements (to find article link)
 - Sends a "slow day" message if no alerts for 6 hours
+- Sends a loud warning if BSE fetching fails (and a recovery notice when it returns)
+
+NOTE: api.bseindia.com sits behind Akamai bot protection that rejects the
+standard `requests` library. BSE calls therefore use curl_cffi, which
+impersonates a real Chrome connection. Telegram calls still use `requests`.
 """
 
 import os
@@ -18,8 +23,9 @@ import time
 import requests
 import csv
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from curl_cffi import requests as cffi_requests
 from google import genai
 from google.genai import types
 
@@ -31,20 +37,21 @@ TELEGRAM_CHAT_ID_REGULATOR = os.environ.get("TELEGRAM_CHAT_ID_REGULATOR", "")
 COMPANIES_FILE  = "companies.csv"
 SEEN_FILE       = "/root/seen_announcements.json"
 LAST_ALERT_FILE = "last_alert.json"
+FETCH_FAIL_FILE = "/root/last_fetch_fail.json"
 
-SLOW_DAY_HOURS = 6
+SLOW_DAY_HOURS            = 6
+FETCH_FAIL_COOLDOWN_HOURS = 3   # max one "BSE fetch failing" alert per this many hours
+SEEN_RETENTION_DAYS       = 3   # BSE is queried by date, so older IDs are never needed
+MAX_PAGES                 = 5   # pages of BSE results fetched per run
+GEMINI_RETRIES            = 2   # extra attempts if Gemini errors (e.g. 503)
+
+IST = timezone(timedelta(hours=5, minutes=30))  # BSE dates are Indian time
 
 BSE_API_URL  = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
 BSE_DOC_BASE = "https://www.bseindia.com/xml-data/corpfiling/AttachLive/"
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Referer": "https://www.bseindia.com/",
-}
+# Only a Referer: curl_cffi supplies a matching Chrome User-Agent/fingerprint itself.
+BSE_HEADERS = {"Referer": "https://www.bseindia.com/"}
 
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 GEMINI_MODEL = "gemini-2.5-flash"
@@ -117,16 +124,41 @@ def match_company(scrip_code: str, company_name: str, by_code: dict, by_name: di
     return None, set()
 
 
-def load_seen() -> set:
-    if Path(SEEN_FILE).exists():
+def load_seen() -> dict:
+    """
+    Returns {announcement_id: iso_timestamp}.
+    Also accepts the old format (a plain list of IDs) and upgrades it.
+    """
+    if not Path(SEEN_FILE).exists():
+        return {}
+    try:
         with open(SEEN_FILE) as f:
-            return set(json.load(f))
-    return set()
+            data = json.load(f)
+    except Exception as e:
+        print(f"  [WARN] Could not read seen cache ({e}) — starting fresh")
+        return {}
+    if isinstance(data, list):
+        now_iso = datetime.now().isoformat()
+        return {i: now_iso for i in data}
+    return data
 
 
-def save_seen(seen: set):
+def prune_seen(seen: dict) -> dict:
+    """Drop entries older than SEEN_RETENTION_DAYS so the cache stays small."""
+    cutoff = datetime.now() - timedelta(days=SEEN_RETENTION_DAYS)
+    kept = {}
+    for key, ts in seen.items():
+        try:
+            if datetime.fromisoformat(ts) >= cutoff:
+                kept[key] = ts
+        except Exception:
+            kept[key] = ts
+    return kept
+
+
+def save_seen(seen: dict):
     with open(SEEN_FILE, "w") as f:
-        json.dump(list(seen), f, indent=2)
+        json.dump(prune_seen(seen), f)
 
 
 def load_last_alert_time() -> datetime | None:
@@ -144,31 +176,55 @@ def save_last_alert_time():
         json.dump({"last_alert": datetime.now().isoformat()}, f)
 
 
-def fetch_announcements(lookback_minutes: int = 10) -> list:
-    now   = datetime.now()
-    from_ = now - timedelta(minutes=lookback_minutes)
-    params = {
-        "pageno":      "1",
-        "strCat":      "-1",
-        "strPrevDate": from_.strftime("%Y%m%d"),
-        "strScrip":    "",
-        "strSearch":   "P",
-        "strToDate":   now.strftime("%Y%m%d"),
-        "strType":     "C",
-        "subcategory": "-1",
-    }
-    try:
-        resp = requests.get(BSE_API_URL, params=params, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-        return resp.json().get("Table", [])
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch announcements: {e}")
-        return []
-
-
 def announcement_id(ann: dict) -> str:
     key = f"{ann.get('NEWSID','')}-{ann.get('DT_TM','')}"
     return hashlib.md5(key.encode()).hexdigest()
+
+
+def fetch_announcements(lookback_minutes: int = 10):
+    """
+    Returns a list of announcements (possibly empty), or None if BSE
+    could not be reached at all (so the caller can raise an alarm).
+    """
+    now_ist = datetime.now(IST)
+    from_   = now_ist - timedelta(minutes=lookback_minutes)
+
+    all_rows = []
+    seen_ids = set()
+
+    for page in range(1, MAX_PAGES + 1):
+        params = {
+            "pageno":      str(page),
+            "strCat":      "-1",
+            "strPrevDate": from_.strftime("%Y%m%d"),
+            "strScrip":    "",
+            "strSearch":   "P",
+            "strToDate":   now_ist.strftime("%Y%m%d"),
+            "strType":     "C",
+            "subcategory": "-1",
+        }
+        try:
+            resp = cffi_requests.get(
+                BSE_API_URL, params=params, headers=BSE_HEADERS,
+                impersonate="chrome", timeout=30,
+            )
+            resp.raise_for_status()
+            rows = resp.json().get("Table", []) or []
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch announcements (page {page}): {e}")
+            if page == 1:
+                return None
+            break  # keep what earlier pages gave us
+
+        new_rows = [r for r in rows if announcement_id(r) not in seen_ids]
+        if not new_rows:
+            break  # empty page, or the API repeated itself — we're done
+        for r in new_rows:
+            seen_ids.add(announcement_id(r))
+        all_rows.extend(new_rows)
+        time.sleep(0.5)
+
+    return all_rows
 
 
 def get_attachment_url(ann: dict):
@@ -177,7 +233,9 @@ def get_attachment_url(ann: dict):
 
 
 def download_attachment(url: str):
-    resp = requests.get(url, headers=HEADERS, timeout=60)
+    resp = cffi_requests.get(
+        url, headers=BSE_HEADERS, impersonate="chrome", timeout=60
+    )
     resp.raise_for_status()
     ct = resp.headers.get("Content-Type", "application/octet-stream").lower()
     return resp.content, ct
@@ -309,6 +367,19 @@ def summarise_with_gemini(content: bytes, mime_type: str, company: str,
     return get_final_text(response), extract_grounding_urls(response)
 
 
+def summarise_with_retry(*args, **kwargs):
+    """Gemini throws the odd transient error (e.g. 503) — retry before giving up."""
+    last_err = None
+    for attempt in range(GEMINI_RETRIES + 1):
+        try:
+            return summarise_with_gemini(*args, **kwargs)
+        except Exception as e:
+            last_err = e
+            if attempt < GEMINI_RETRIES:
+                time.sleep(3 * (attempt + 1))
+    raise last_err
+
+
 def send_telegram(chat_id: str, message: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
@@ -327,6 +398,35 @@ def send_telegram(chat_id: str, message: str):
     print(f"  [TELEGRAM → {chat_id}] {message[:60]}…")
 
 
+def send_fetch_failure_alert():
+    """Alert at most once per FETCH_FAIL_COOLDOWN_HOURS while BSE fetching is failing."""
+    try:
+        if Path(FETCH_FAIL_FILE).exists():
+            with open(FETCH_FAIL_FILE) as f:
+                last = datetime.fromisoformat(json.load(f)["last"])
+            if datetime.now() - last < timedelta(hours=FETCH_FAIL_COOLDOWN_HOURS):
+                return
+        send_telegram(
+            TELEGRAM_CHAT_ID,
+            "⚠️ BSE fetch is failing, so no announcements are being checked. "
+            "Check scraper.log on the server.",
+        )
+        with open(FETCH_FAIL_FILE, "w") as f:
+            json.dump({"last": datetime.now().isoformat()}, f)
+    except Exception as e:
+        print(f"  [ERROR] Fetch-failure alert failed: {e}")
+
+
+def send_recovery_notice():
+    """If an earlier failure alert was sent, tell the group BSE is back."""
+    try:
+        if Path(FETCH_FAIL_FILE).exists():
+            send_telegram(TELEGRAM_CHAT_ID, "✅ BSE fetch has recovered.")
+            Path(FETCH_FAIL_FILE).unlink()
+    except Exception as e:
+        print(f"  [ERROR] Recovery notice failed: {e}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -335,6 +435,13 @@ def main():
     by_code, by_name = load_companies()
     seen          = load_seen()
     announcements = fetch_announcements(lookback_minutes=10)
+
+    if announcements is None:
+        print("  BSE fetch failed — skipping this run")
+        send_fetch_failure_alert()
+        return
+
+    send_recovery_notice()
     print(f"  Fetched {len(announcements)} announcements from BSE")
 
     real_alerts = 0
@@ -343,7 +450,7 @@ def main():
         ann_id = announcement_id(ann)
         if ann_id in seen:
             continue
-        seen.add(ann_id)
+        seen[ann_id] = datetime.now().isoformat()
 
         company_name = str(ann.get("SLONGNAME") or ann.get("SSHORTNAME") or "").strip()
         scrip_code   = str(ann.get("SCRIP_CD") or "").strip()
@@ -364,17 +471,19 @@ def main():
 
         summary     = bse_headline if bse_headline else headline
         source_urls = []
+        ai_failed   = False
         attach_url  = get_attachment_url(ann)
 
         if attach_url:
             try:
                 print(f"    Downloading: {attach_url}")
                 content, mime = download_attachment(attach_url)
-                summary, source_urls = summarise_with_gemini(
+                summary, source_urls = summarise_with_retry(
                     content, mime, matched_display, headline, is_clarification
                 )
                 print(f"    AI Summary: {summary}")
             except Exception as e:
+                ai_failed = True
                 print(f"    [WARN] Attachment processing failed: {e}")
 
         if summary.strip().upper().startswith("DISCARD"):
@@ -386,6 +495,9 @@ def main():
         # Fallback: clarification but no link in summary — use grounding metadata
         if is_clarification and "http" not in summary and source_urls:
             summary += f"\n📰 Article: {source_urls[0]}"
+
+        if ai_failed:
+            summary += "\n⚠️ AI summary unavailable, showing BSE headline only."
 
         time_str = dt_tm[:16] if len(dt_tm) >= 16 else dt_tm
         message = (
